@@ -1,0 +1,11 @@
+<ol class="list" reversed>
+  <% for (const item of items) { %>
+    <li <%= metadataAttrs(item) %>>
+      <a href="<%- item.path %>">
+      <span class="listing-author"><%= item.author %></span>
+      (<%= item.date %>)
+      <span class="listing-title"><i><%= item.title %></i></span>.
+      <span class="listing-description"><%= item.description %></span>.
+    </li>
+  <% } %>
+</ol>

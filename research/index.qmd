@@ -1,0 +1,25 @@
+---
+title: "Research"
+---
+
+## Working Papers
+
+---
+listing:
+  template: custom.ejs
+  contents: "working/."
+  sort: "date desc"
+  date-format: "YYYY"
+  sort-ui: false
+---
+
+## Publications
+
+---
+listing:
+  template: custom.ejs
+  contents: "published/."
+  sort: "date desc"
+  date-format: "YYYY"
+  sort-ui: false
+---

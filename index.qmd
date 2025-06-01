@@ -1,0 +1,18 @@
+---
+title: "Rodrigo Sarlo"
+about:
+  template: jolla
+  image: images/profile.jpg
+---
+
+PhD Student at PUC-Rio • Time Series Forecasting • Programming
+
+------------------------------------------------------------------------
+
+::: homepage-intro
+Hi, and welcome! I’m Rodrigo Sarlo Antonio Filho, a PhD student in Electrical Engineering at PUC-Rio and visiting researcher at UIUC.
+
+I created this website to share my research, code, personal projects, and occasional thoughts.
+
+Feel free to explore - and if something catches your interest, don’t hesitate to [reach out](mailto:rodrigosarlofilho@gmail.com).
+:::

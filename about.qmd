@@ -1,0 +1,64 @@
+---
+title: "Rodrigo Sarlo"
+about:
+  template: trestles
+  image: images/about_picture.jpeg
+  links:
+    - icon: envelope
+      href: mailto:rodrigosarlofilho@gmail.com
+    - icon: linkedin
+      href: https://www.linkedin.com/in/rodrigo-sarlo-antonio-filho-b93250144/
+    - icon: github
+      href: https://github.com/rodrigosarloaf
+    - icon: instagram
+      href: https://www.instagram.com/rodrigosarloaf
+---
+
+### About me
+
+I’m Rodrigo Sarlo Antonio Filho, a PhD student in Electrical Engineering at PUC-Rio, where I focus on time series forecasting. Currently, I’m spending a year as a visiting researcher at the Department of Economics at the University of Illinois Urbana-Champaign (UIUC).
+
+Before beginning my PhD, I worked as a data scientist and quantitative analyst. My main interests lie in forecasting and data-driven decision-making.
+
+## Education
+
+**PUC-Rio** \| Rio de Janeiro, RJ
+
+PhD in Electrical Engineering[^1] \| 2023 - 2027 (expected)
+
+[^1]: Emphasis on Decision Support Methods
+
+------------------------------------------------------------------------
+
+**University of Illinois Urbana-Champaign (UIUC)** \| Urbana, IL
+
+Visiting Researcher, Department of Economics \| 2024 – 2025
+
+------------------------------------------------------------------------
+
+**PUC-Rio** \| Rio de Janeiro, RJ
+
+MSc in Electrical Engineering[^2] \| 2019 - 2021
+
+[^2]: Emphasis on Decision Support Methods
+
+------------------------------------------------------------------------
+
+**PUC-Rio** \| Rio de Janeiro, RJ
+
+BSc in Economics \| 2014 - 2018
+
+## Experience
+
+**Asset 1 Investment Company** \| São Paulo, SP\
+Quantitative Analyst \| 2021 - 2022
+
+------------------------------------------------------------------------
+
+**Kogno Economics** \| Rio de Janeiro, RJ\
+Partner \| 2020 - 2021
+
+------------------------------------------------------------------------
+
+**NASDA, PUC-Rio** \| Rio de Janeiro, RJ\
+Researcher \| 2018 - 2021

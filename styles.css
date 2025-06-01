@@ -1,0 +1,11 @@
+/* css styles */
+
+/* restrict text size in the homepage */
+.homepage-intro {
+  max-width: 500px;
+  margin: 0 auto;
+  text-align: left;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  padding: 1rem;
+}
