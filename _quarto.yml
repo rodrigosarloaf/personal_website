@@ -17,6 +17,11 @@ website:
       - href: about.qmd
         text: About
         icon: person-circle
+    right:
+      - icon: github
+        href: https://github.com/rodrigosarloaf/personal_website
+        aria-label: GitHub
+        text: Source Code
   page-footer: 
     left: "&#169; 2025 Rodrigo Sarlo" 
     center: 
