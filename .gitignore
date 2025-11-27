@@ -7,3 +7,4 @@
 
 # Ignoring _site
 _site/*
+/.quarto/
