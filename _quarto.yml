@@ -27,6 +27,8 @@ website:
     center: 
       - icon: envelope
         href: mailto:rodrigosarlofilho@gmail.com
+      - text: "{{< iconify academicons:google-scholar >}}"
+        href: https://scholar.google.com/citations?user=lGXEOr4AAAAJ
       - icon: linkedin
         href: https://www.linkedin.com/in/rodrigo-sarlo-antonio-filho-b93250144/
       - icon: github
