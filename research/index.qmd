@@ -1,25 +1,37 @@
 ---
 title: "Research"
+listing:
+  - id: working-papers
+    template: custom.ejs
+    contents: "working/."
+    sort: "date desc"
+    date-format: "YYYY"
+    sort-ui: false
+  - id: publications
+    template: custom.ejs
+    contents: "published/."
+    sort: "date desc"
+    date-format: "YYYY"
+    sort-ui: false
+  - id: conference-papers
+    template: custom.ejs
+    contents: "conference/."
+    sort: "date desc"
+    date-format: "YYYY"
+    sort-ui: false
 ---
 
 ## Working Papers
 
----
-listing:
-  template: custom.ejs
-  contents: "working/."
-  sort: "date desc"
-  date-format: "YYYY"
-  sort-ui: false
----
+:::{#working-papers}
+:::
 
 ## Publications
 
----
-listing:
-  template: custom.ejs
-  contents: "published/."
-  sort: "date desc"
-  date-format: "YYYY"
-  sort-ui: false
----
+:::{#publications}
+:::
+
+## Conference Papers
+
+:::{#conference-papers}
+:::
