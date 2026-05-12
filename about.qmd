@@ -8,6 +8,8 @@ about:
       href: mailto:rodrigosarlofilho@gmail.com
     - text: "{{< iconify academicons:google-scholar >}}"
       href: https://scholar.google.com/citations?user=lGXEOr4AAAAJ
+    - text: "{{< iconify academicons:orcid >}}"
+      href: https://orcid.org/0000-0002-7198-6124
     - icon: linkedin
       href: https://www.linkedin.com/in/rodrigo-sarlo-antonio-filho-b93250144/
     - icon: github
@@ -26,9 +28,7 @@ Before beginning my PhD, I worked as a data scientist and quantitative analyst. 
 
 **PUC-Rio** \| Rio de Janeiro, RJ
 
-PhD in Electrical Engineering[^1] \| 2023 - 2026 (expected)
-
-[^1]: Emphasis on Decision Support Methods
+PhD in Electrical Engineering<a href="#fn-decision" title="Emphasis on Decision Support Methods"><sup>\*</sup></a> \| 2023 - 2026 (expected)
 
 ------------------------------------------------------------------------
 
@@ -40,9 +40,7 @@ Visiting Researcher, Department of Economics \| 2024 – 2026
 
 **PUC-Rio** \| Rio de Janeiro, RJ
 
-MSc in Electrical Engineering[^2] \| 2019 - 2021
-
-[^2]: Emphasis on Decision Support Methods
+MSc in Electrical Engineering<a href="#fn-decision" title="Emphasis on Decision Support Methods"><sup>\*</sup></a> \| 2019 - 2021
 
 ------------------------------------------------------------------------
 
@@ -64,3 +62,5 @@ Partner \| 2020 - 2021
 
 **NASDA, PUC-Rio** \| Rio de Janeiro, RJ\
 Researcher \| 2018 - 2021
+
+<br><small id="fn-decision"><sup>\*</sup> Emphasis on Decision Support Methods</small>

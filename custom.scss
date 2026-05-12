@@ -1,0 +1,44 @@
+/*-- scss:defaults --*/
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+// Typography
+$font-family-sans-serif: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !default;
+$font-family-monospace: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !default;
+
+// Deep dark background inspired by premium documentation sites
+$body-bg: #0d1117 !default;
+$body-color: #c9d1d9 !default;
+
+// Navbar styling
+$navbar-bg: #010409 !default;
+$navbar-fg: #c9d1d9 !default;
+
+// Accent colors (sleek modern blue)
+$primary: #58a6ff !default; 
+$link-color: #58a6ff !default;
+$link-hover-color: #79c0ff !default;
+
+// Borders and subtle highlights
+$border-color: #30363d !default;
+
+/*-- scss:rules --*/
+
+// Add subtle borders to the navbar and footer for structure
+.navbar {
+  border-bottom: 1px solid #30363d !important;
+}
+
+.footer {
+  border-top: 1px solid #30363d !important;
+  background-color: #010409 !important;
+}
+
+// Smooth hover effects on links
+a {
+  transition: color 0.2s ease-in-out;
+}
+
+// Ensure icons in the navbar and footer match the color scheme
+.navbar .nav-link:hover, .footer .nav-link:hover {
+  color: #79c0ff !important;
+}

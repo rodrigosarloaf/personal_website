@@ -1,7 +1,7 @@
 ---
 author: Rodrigo Sarlo, Denis Borenstein, Cristiano Fernandes
 date: 2025-10-06
-title: Forecasting intermittent demand with dynamic Poisson mixtures
+title: Forecasting intermittent demand with dynamic Poisson mixtures - a score-driven approach
 description: LVII Brazilian Symposium on Operations Research
 doi: 10.59254/sbpo-2025-212628
 page-layout: article
