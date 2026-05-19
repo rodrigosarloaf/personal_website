@@ -5,6 +5,7 @@ website:
   title: "Rodrigo Sarlo"
   description: "Personal website of Rodrigo Sarlo, PhD student in Electrical Engineering at PUC-Rio focusing on Time Series Forecasting."
   site-url: "https://rodrigosarloaf.netlify.app"
+  google-analytics: "G-LMQSJQ8YCL"
   open-graph: true
   navbar:
     background: dark
