@@ -4,6 +4,9 @@ about:
   template: trestles
   image: images/about_picture.jpeg
   links:
+    - icon: file-earmark-pdf
+      text: CV
+      href: cv.pdf
     - icon: envelope
       href: mailto:rodrigosarlofilho@gmail.com
     - text: "{{< iconify academicons:google-scholar >}}"
@@ -19,6 +22,10 @@ about:
 ---
 
 ### About me
+
+<a href="cv.pdf" class="btn btn-outline-primary btn-sm" role="button" target="_blank" style="margin-bottom: 20px; padding: 8px 15px;">
+  <i class="bi bi-file-earmark-pdf"></i> Download CV (PDF)
+</a>
 
 I’m Rodrigo Sarlo Antonio Filho, a PhD student in Electrical Engineering at PUC-Rio, where I focus on time series forecasting. Currently, I’m spending a year as a visiting researcher at the Department of Economics at the University of Illinois Urbana-Champaign (UIUC).
 

@@ -11,3 +11,5 @@ _site/*
 /.quarto/
 # Ignoring auxiliary html objects from lectures
 *_files/
+# Others
+cv.pdf
