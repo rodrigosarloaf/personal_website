@@ -18,6 +18,9 @@ website:
       - href: research/index.qmd
         text: Research
         icon: book
+      - href: teaching/index.qmd
+        text: Teaching
+        icon: mortarboard
       - href: about.qmd
         text: About
         icon: person-circle

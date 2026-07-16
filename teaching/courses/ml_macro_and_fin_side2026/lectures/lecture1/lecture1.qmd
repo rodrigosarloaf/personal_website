@@ -1,0 +1,471 @@
+---
+title: "Lecture 1: Data Ecosystems, Tidymodels & Tidyfinance"
+subtitle: "Machine Learning for Macro Forecasting and Financial Econometrics (SIdE 2026)"
+author: "Rodrigo Sarlo"
+date: "July 2026"
+format:
+  html:
+    toc: true
+    toc-float: true
+    code-fold: true
+    code-summary: "Show the Code"
+    code-tools: true
+---
+
+## Overview
+Welcome to the first practical session. Today, we begin by presenting the monthly FRED-MD database and demonstrating its retrieval and treatment using the `{fbi}` and `{fredr}` packages. We then offer a first exposition of `{tidymodels}` and `{tidyfinance}`, focusing on data import and processing techniques for time series analysis and forecasting. We start with a basic introduction to their functionalities, laying a foundation that we build upon as more advanced tools are introduced in later lectures.
+
+---
+
+## Part 1: FRED-MD Database & Tidymodels Workflow
+
+In this section, we set up our modeling framework. First, we explore the **FRED-MD** database, discuss the stationarity transformations proposed by McCracken and Ng (2016), and show how to download and clean the dataset programmatically using `{fbi}` and `{fredr}`. Second, we integrate our data into the `{tidymodels}` environment for modeling.
+
+---
+
+### 1.1 The FRED-MD Dataset & Stationarity Transformations
+
+#### About FRED-MD
+FRED-MD is a monthly database containing 120+ macroeconomic time series starting in 1959. Designed as a standard dataset for the analysis of big data in macroeconomics, it mimics the characteristics of datasets typically used in dynamic factor models and machine learning applications. The variables are grouped into 8 core categories:
+
+1. Output and income
+2. Labor market
+3. Housing
+4. Consumption, orders, and inventories
+5. Money and credit
+6. Interest and exchange rates
+7. Prices
+8. Stock market
+
+#### Macroeconomic Revisions & Vintages
+A crucial feature of macroeconomic data is that it is subject to subsequent revisions by reporting agencies (e.g., industrial production or employment figures are regularly updated as more complete information becomes available).
+
+- **What is a Vintage?** A vintage refers to the snapshot of the dataset as it was publicly available at a specific point in time. For instance, the *July 2026 vintage* of FRED-MD contains the series as they were published and known in July 2026.
+
+- **Why it matters:** Using the most recent "finalized" data to evaluate historical forecasts can lead to overoptimistic results (look-ahead bias) because the model is trained or evaluated on revised data that was not actually available to forecasters in real time. To conduct true, realistic out-of-sample forecasting exercises, researchers must use historical vintages to reconstruct the exact information set available at each forecast origin.
+
+The St. Louis Fed provides access to historical vintages of the FRED-MD database, allowing researchers to perform vintage-consistent analyses. However, for simplicity in this course, we work with the latest available data, acknowledging that this is a common practice in many empirical studies but not ideal for rigorous forecast evaluation.
+
+#### Stationarity Transformation Codes
+To avoid spurious regressions and satisfy the assumptions of most predictive models, the series must be transformed to achieve stationarity. McCracken and Ng (2016) define seven transformation codes ($tcode$):
+
+| Code ($tcode$) | Transformation | Formula |
+| :---: | :--- | :--- |
+| **1** | No transformation | $y_t = x_t$ |
+| **2** | First difference | $y_t = \Delta x_t = x_t - x_{t-1}$ |
+| **3** | Second difference | $y_t = \Delta^2 x_t = (x_t - x_{t-1}) - (x_{t-1} - x_{t-2})$ |
+| **4** | Natural logarithm | $y_t = \ln(x_t)$ |
+| **5** | First difference of logarithm | $y_t = \Delta \ln(x_t) = \ln(x_t) - \ln(x_{t-1})$ |
+| **6** | Second difference of logarithm | $y_t = \Delta^2 \ln(x_t) = \Delta \ln(x_t) - \Delta \ln(x_{t-1})$ |
+| **7** | Percent change | $y_t = \left(\frac{x_t}{x_{t-1}} - 1\right) \times 100$ |
+
+#### Fetching and Processing Options
+We can load and transform the FRED-MD database using either the specialized `{fbi}` package or by fetching custom series with `{fredr}` and applying manual transformations.
+
+::: {.panel-tabset}
+
+##### Option A: The `{fbi}` Package
+The `{fbi}` package is designed specifically for factor-based imputation and managing the FRED-MD database. It provides functions to easily download and transform the data from the St. Louis Fed website.
+
+> **Warning:**
+> By default, the McCracken-Ng FRED-MD database suggests **tcode 6** (second difference of logarithms) for price-related index variables (Group 7). We opt to manually change the transformation codes of all price indices from **6** to **7** (percent change) before processing the raw series.
+
+```r
+# Install from GitHub
+# remotes::install_github("cykbennie/fbi")
+library(tidyverse)
+library(fbi)
+
+# 1. Download raw (untransformed) FRED-MD series
+req_fredmd <- httr::GET("https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/2026-05-md.csv")
+raw_data <- httr::content(req_fredmd, as = "parsed")
+
+# This is the latest dataset at the time of writing
+head(raw_data)
+
+# 2. Retrieve default tcodes
+tcodes <- unlist(raw_data[1, 2:ncol(raw_data)], use.names = TRUE)
+
+# 3. Identify Group 7 (Prices) variables from the metadata
+data("fredmd_description")
+price_vars <- fredmd_description %>%
+  filter(group == "Prices") %>%
+  pull(fred)
+
+# 4. Modify price variables tcode from 6 to 7
+tcodes[(names(tcodes) %in% price_vars) & (tcodes == 6)] <- 7
+
+# 5. Insert back the modified data
+modif_data <- raw_data
+modif_data[1, 2:ncol(raw_data)] <- as.list(tcodes)
+
+# Create data directory if it doesn't exist, then write to disk
+dir.create("data", showWarnings = FALSE)
+write_csv(modif_data, "data/fredmd_custom.csv")
+
+# 6. Load the modified dataset using fbi::fredmd with transform = TRUE
+# The function will automatically read our updated tcode row and transform the data.
+macro_data <- fredmd(
+  file = "data/fredmd_custom.csv",
+  transform = TRUE
+)
+
+# 7. Keeping only the variables with all observations between 1960-01-01 and 2025-09-01
+# Some Price variables are not available for the last quarter of 2025, so we keep data until 2025Q3
+# Filtering dates
+macro_data <- macro_data %>% as_tibble() %>% 
+  filter(date >= ymd("1960-01-01"), date <= ymd("2025-09-01"))
+# Filtering variables with NAs
+na_variables <- colSums(is.na(macro_data))
+na_variables <- names(na_variables[na_variables > 0])
+print("Variables with NAs:")
+print(na_variables)
+
+balanced_data <- macro_data %>% select(-any_of(na_variables))
+write_csv(balanced_data, "data/balanced_fredmd.csv")
+
+# Final dimensions of the cleaned dataset
+dim(balanced_data)
+
+```
+
+##### Option B: Manual Fetch via `{fredr}`
+If you want to pull custom, specific series from FRED rather than the entire pre-packaged database, configure `{fredr}` with your API key.
+
+```r
+library(tidyverse)
+library(fredr)
+
+# fredr_set_key("YOUR_API_KEY_HERE")
+
+# Fetch raw series (example: Industrial Production Index)
+raw_indpro <- fredr(
+  series_id = "INDPRO",
+  observation_start = as.Date("1960-01-01"),
+  observation_end = as.Date("2025-12-31")
+)
+```
+One way to get all `series_id` in the FRED-MD database is to use the metadata provided in the `{fbi}` package—see item #3 in Option A.
+
+##### Stationarizing Manually
+Here is how you can apply McCracken and Ng transformation codes manually to individual series downloaded via `{fredr}`:
+
+```r
+# Custom transformation function
+apply_tcode <- function(x, tcode) {
+  case_when(
+    tcode == 1 ~ x,
+    tcode == 2 ~ x - lag(x),
+    tcode == 3 ~ (x - lag(x)) - (lag(x) - lag(x, 2)),
+    tcode == 4 ~ log(x),
+    tcode == 5 ~ log(x) - lag(log(x)),
+    tcode == 6 ~ (log(x) - lag(log(x))) - (lag(log(x)) - lag(log(x), 2)),
+    tcode == 7 ~ (x / lag(x) - 1) * 100,
+    TRUE ~ x
+  )
+}
+
+# Example: Industrial Production (INDPRO) uses tcode 5
+clean_indpro <- raw_indpro %>%
+  mutate(transformed_value = apply_tcode(value, tcode = 5)) %>%
+  drop_na()
+```
+:::
+
+---
+
+### 1.2 Modeling in the Tidymodels Environment
+
+Once our variables are stationarized and aligned in a wide data frame format, we can use the `{tidymodels}` ecosystem to manage our predictive workflows.
+
+`{tidymodels}` is a collection of packages representing the successor to the earlier `{caret}` package, which aimed to unify the modeling process in R by standardizing syntax and workflows across different modeling techniques. The tidyverse-inspired design of `{tidymodels}` provides a more consistent, modular, and intuitive syntax. It includes tools for resampling, preprocessing, model specification, hyperparameter tuning, and performance evaluation.
+
+The core packages in the `{tidymodels}` ecosystem include:
+
+- **`{rsample}`**: Manages data splitting.
+- **`{recipes}`**: Handles data preprocessing and cleaning pipelines.
+- **`{parsnip}`**: Provides a unified interface for model specification.
+- **`{workflows}`**: Bundles preprocessing recipes and model specifications together.
+- **`{dials}`**: Manages hyperparameters and tuning parameter objects.
+- **`{tune}`**: Handles hyperparameter tuning.
+- **`{yardstick}`**: Evaluates model performance.
+- **`{broom}`**: Unifies model outputs into tidy data frames.
+
+To replicate the empirical framework of Medeiros et al. (2021), we execute certain preprocessing operations, such as lagging the predictors and creating a dummy, offline. This prepared dataset is then used to construct our resampling folds and define our final preprocessing recipes.
+
+::: {.panel-tabset}
+
+##### 0: Offline Preprocessing
+Some sensitive operations, like generating lag structures, should be performed *offline* (outside the `{recipes}` package). 
+
+When lagging is defined within a recipe after partitioning data with `rolling_origin()`, the lag calculations are applied to each split independently. This introduces *new* `NA` values at the beginning of each assessment and analysis set, dropping valuable observations in every fold (we discuss this in detail under Tab 2). To avoid this, we generate 4 lags for all variables, create the same intervention dummy from the original paper, select the target and lagged predictors, and drop the first 4 rows to eliminate lagging-induced `NA`s prior to splitting.
+
+```r
+# Create 4 lags of all variables, add a dummy for 2008-11-01, and drop the first 4 rows
+treated_data <- balanced_data %>%
+  mutate(across(2:last_col(), # All columns except date
+                # The following snippet is repetitive, but easy to modify column names
+                list(lag1 = ~dplyr::lag(.x, n = 1),
+                     lag2 = ~dplyr::lag(.x, n = 2),
+                     lag3 = ~dplyr::lag(.x, n = 3),
+                     lag4 = ~dplyr::lag(.x, n = 4)), 
+                .names = "{.fn}_{.col}"), # Include lag information in the names
+         d200811 = ifelse(date == ymd("2008-11-01"), 1, 0)
+         ) %>%
+  # Keep only the target variable, the dummy, and the lagged predictors
+  select(date, CPIAUCSL, d200811, starts_with("lag")) %>%
+  # Skip the first 4 rows containing NAs from lagging
+  filter(date >= ymd("1960-05-01"))
+
+# Save the preprocessed dataset
+write_csv(treated_data, "data/treated_fredmd.csv")
+
+# Finally, let's create a hold out the last 48 months for final model comparison
+n_test <- 48
+train_val_data <- treated_data %>% slice(1:(n() - n_test))
+holdout_test_data <- treated_data %>% slice_tail(n = n_test)
+
+# Save both datasets to disk
+write_csv(train_val_data, "data/train_val_fredmd.csv")
+write_csv(holdout_test_data, "data/test_fredmd.csv")
+```
+
+##### 1: Splitting the data with `{rsample}`
+The `{rsample}` package is used to partition the data. For time series, we perform chronological rolling or expanding window validation using `rolling_origin()`.
+
+```r
+library(tidymodels)
+
+# Folds for rolling window cross-validation (tuning) using only train_val_data
+folds <- rolling_origin(
+  train_val_data,
+  initial = 360,     # 30 years of training data
+  assess = 1,        # 1 month of evaluation data
+  cumulative = FALSE # FALSE for rolling window
+)
+
+# Inspect the structure of the folds dataframe
+head(folds)
+dim(folds)
+
+# Inspect a specific split
+first_split <- folds$splits[[1]]
+print(first_split) # Shows <Analysis/Assessment/Total> sizes
+
+# Extract the training (in-sample) and testing (out-of-sample) data for this fold
+train_data <- analysis(first_split)
+test_data <- assessment(first_split)
+
+head(train_data)
+head(test_data)
+```
+
+##### 2: Preprocessing with `{recipes}`
+The `{recipes}` package defines the modeling formula and preprocessing pipeline. To construct the final features, we extract 4 Principal Components from each lag-set, approximating the framework in Medeiros et al. (2021).
+
+> **Note:** Computing Principal Components (PCs) after lagging the dataset differs slightly from the original study, where PCs are calculated first and then lagged. We adopt this sequence to keep the workflow simpler, more intuitive, and fully aligned with `{recipes}` conventions. This minor deviation may result in small numerical differences from the paper's original estimates.
+
+```r
+# Define the recipe
+fredmd_recipe <- recipe(CPIAUCSL ~ ., data = train_val_data) %>%
+  # Drop the date variable so it is not used in models
+  step_rm(date) %>%
+  # Apply PCA per lag-set
+  step_pca(contains("lag1_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag1_PC") %>%
+  step_pca(contains("lag2_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag2_PC") %>%
+  step_pca(contains("lag3_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag3_PC") %>%
+  step_pca(contains("lag4_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag4_PC") %>%
+  # Drop the dummy if it contains all zeros
+  step_zv(d200811)
+# Inspect recipe steps
+print(fredmd_recipe)
+
+# We can call prep() and bake() to evaluate the recipe on training data and get the transformed dataset
+prepped_recipe <- prep(fredmd_recipe, training = train_data) # Prepares the recipe by estimating the PCA on the training data
+transformed_train_data <- bake(prepped_recipe, new_data = train_data) # Returns the training data with the PCA components added as new columns
+
+head(transformed_train_data)
+dim(transformed_train_data)
+
+# We can also apply the same prepped recipe (using in-sample **information**) to the test data to get the transformed test set
+# This is part of what the {tidyverse} workflow automates for us
+transformed_test_data <- bake(prepped_recipe, new_data = test_data)
+head(transformed_test_data)
+
+```
+:::
+
+In the next lectures, we will continue building our modeling workflow with the same objects prepared above.
+
+---
+
+## Part 2: Overview of the Tidyfinance Package
+
+In this section, we transition to financial data using the `{tidyfinance}` package. The intent of `{tidyfinance}` is to provide an open-source and tidy-principled computational framework for empirical finance and asset pricing. By standardizing common workflows, the package allows researchers to programmatically fetch data, structure asset return datasets, and construct standardized firm characteristics that serve as critical features for predictive machine learning models.
+
+In this presentation, we focus on accessing freely available open data using the package and performing basic data manipulation tasks.
+
+::: {.panel-tabset}
+
+### 1: Fetching Data
+The `{tidyfinance}` package provides a unified, clean interface to download a wide variety of financial datasets using the `download_data()` function. Below, we show how to download specific stock prices, retrieve index constituents, fetch Fama-French asset pricing risk factors, and download data from FRED.
+
+```r
+library(tidyverse)
+library(tidyfinance)
+
+# 1. Fetching specific individual stock prices from Yahoo Finance
+prices_apple <- download_data(
+  domain = "stock_prices", # From Yahoo Finance by default
+  symbols = "AAPL",
+  start_date = "2020-01-01",
+  end_date = "2025-12-31"
+)
+# Returns standard information in a tidy format
+head(prices_apple)
+
+# 2. Fetch the constituents list of the Dow Jones Industrial Average
+dow_constituents <- download_data(
+  domain = "constituents",
+  index = "Dow Jones Industrial Average"
+)
+# We can now use the tickers from this list to fetch price data for all DJIA components
+head(dow_constituents)
+
+# 3. Pull tickers and download prices for all DJIA components
+dow_tickers <- dow_constituents %>% pull(symbol)
+# Stacks the price data for all DJIA components into a single tidy data frame
+prices <- download_data(
+  domain = "stock_prices",
+  symbols = dow_tickers,
+  start_date = "2020-01-01",
+  end_date = "2025-12-31"
+)
+dim(prices)
+
+# 4. Fetch the Fama/French 3-Factor Model data (monthly frequency)
+# Downloads directly from Kenneth French's data library and returns a processed tibble
+factors_ff3 <- download_data(
+  domain = "famafrench",
+  dataset = "factors_ff_3_monthly",
+  start_date = "2020-01-01",
+  end_date = "2025-12-31"
+)
+head(factors_ff3)
+
+# 5. Fetch macroeconomic indicators from FRED 
+inflation <- download_data(
+  domain = "fred",
+  series = "CPIAUCSL", # Consumer Price Index for All Urban Consumers: All Items
+  start_date = "2020-01-01",
+  end_date = "2025-12-31"
+)
+head(inflation)
+
+# 6. Save the downloaded DJIA prices and Fama-French factors to disk
+write_csv(prices, "data/djia_prices.csv")
+write_csv(factors_ff3, "data/ff_factors.csv")
+```
+
+### 2: Returns, Aggregation & Fama-French Estimation
+
+Data in long format is easily manipulated using the `{tidyverse}` collection of packages. Below, we show how to calculate monthly returns from daily prices, align them with the Fama-French factors, and run the standard asset pricing regressions.
+
+```r
+library(broom)
+
+# 1. Aggregate daily stock prices to monthly frequency
+monthly_returns <- prices %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(symbol, month) %>%
+  filter(date == max(date)) %>% # Keep only the last trading day of the month
+  ungroup() %>%
+  group_by(symbol) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(returns = adjusted_close / lag(adjusted_close) - 1) %>%
+  # Drops the returns from the first month only - check with "anyNA(prices)" ->
+  # we didn't have NAs before calling "lag()"
+  drop_na(returns) %>% 
+  select(symbol, date = month, returns)
+
+# Inspect monthly returns
+head(monthly_returns)
+
+# 2. Align stock returns with Fama-French monthly factors and calculate excess returns
+regression_data <- monthly_returns %>%
+  inner_join(factors_ff3, by = "date") %>%
+  mutate(excess_return = returns - risk_free) # Excess returns (R_i - R_f)
+
+# Inspect the joined data
+head(regression_data)
+
+# 3. Example: Run Fama-French 3-Factor regression for a single stock (e.g., AAPL)
+aapl_fit <- regression_data %>%
+  filter(symbol == "AAPL") %>%
+  lm(excess_return ~ mkt_excess + smb + hml, data = .)
+
+summary(aapl_fit)
+
+# 4. Programmatically run the regression for all DJIA components using purrr and broom
+ff_results <- regression_data %>%
+  group_by(symbol) %>%
+  # Creates a column of tibbles for the tickers 
+  nest() %>%
+  mutate(
+    # Applies "lm()" inside the column of tibbles
+    model = map(data, ~ lm(excess_return ~ mkt_excess + smb + hml, data = .x)),
+    coefficients = map(model, tidy)
+  ) %>%
+  unnest(coefficients) %>%
+  select(symbol, term, estimate, std.error, statistic, p.value)
+
+# Inspect the coefficients (alphas and factor loadings/betas) for all stocks
+head(ff_results)
+
+# 5. Visualize the estimated factor loadings with 95% confidence intervals
+# (We exclude the intercept/alpha for focus on the risk exposures)
+ff_results %>%
+  filter(term != "(Intercept)") %>%
+  ggplot(aes(x = estimate, y = reorder(symbol, estimate), color = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = estimate - 1.96 * std.error, xmax = estimate + 1.96 * std.error), height = 0.2) +
+  # Creates separate panels for each factor
+  facet_wrap(~term, scales = "free_x") +
+  theme_minimal() +
+  labs(
+    title = "Fama-French 3-Factor Loadings for DJIA Stocks",
+    subtitle = "Point estimates with 95% confidence intervals (2020-2025)",
+    x = "Beta Coefficient Estimate",
+    y = "Stock Symbol",
+    color = "Factor"
+  ) +
+  theme(legend.position = "none")
+```
+:::
+
+### Concluding Remarks on `{tidyfinance}`
+
+While we discuss `{tidyfinance}` mostly for data retrieval, the package serves as a helper framework for empirical asset pricing. It is important to emphasize that all of the analytical capabilities are achieved through integration with the `{tidyverse}` and `{tidymodels}` ecosystems.
+
+For a comprehensive step-by-step guide on implementing these empirical methodologies, you can consult the companion book available online:
+
+*   [Tidy Finance with R](https://www.tidy-finance.org/r/)
+
+#### Other Supported Data Sources
+*   **Institutional (WRDS Subscription)**: CRSP (security returns), Compustat (accounting fundamentals), IBES, and OptionMetrics.

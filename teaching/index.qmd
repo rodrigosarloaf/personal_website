@@ -1,0 +1,12 @@
+---
+title: "Teaching"
+listing:
+  id: courses
+  template: custom.ejs
+  contents: "courses/*/index.qmd"
+  sort: "date desc"
+  date-format: "YYYY-MM"
+  sort-ui: false
+---
+
+Here you can find materials, lecture notebooks, and resources from courses, workshops, and lab sessions I have taught or presented.

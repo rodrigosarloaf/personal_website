@@ -1,0 +1,35 @@
+---
+title: "Machine Learning for Macro Forecasting and Financial Econometrics"
+subtitle: "SIdE Summer Course 2026 (Perugia, Italy)"
+author: "Rodrigo Sarlo (Lab Instructor)"
+date: "2026-07-16"
+description: " "
+---
+
+Practical hands-on lab sessions using R, Quarto interactive notebooks, and R scripts.
+
+::: callout-note
+### Course Repository
+
+The complete codebase and instructions are hosted on the [**GitHub Repository: ml_macro_and_fin_side2026**](https://github.com/rodrigosarloaf/ml_macro_and_fin_side2026){target="_blank"}
+:::
+
+::: callout-note
+### Course Page
+
+- [Official SIdE Course Page](https://www.side-iea.it/events/courses/machine-learning-macro-forecasting-and-financial-econometrics-2026){target="_blank"}
+:::
+
+### Interactive Lab Sessions
+
+You can access the interactive Quarto notebooks directly on the website, as well as the accompanying code-along R scripts:
+
+| Day | Topic | Interactive Notebook | Code-Along Scripts |
+|:----------------------:|----------------|----------------|----------------|
+| **Day 1** | Data Ecosystems, Tidymodels & Tidyfinance | [Lecture 1](lectures/lecture1/lecture1.qmd) | [Script Part 1](lectures/lecture1/lecture1_part1.R) / [Script Part 2](lectures/lecture1/lecture1_part2.R) |
+| **Day 2** | Regularized Linear Models & Covariance Shrinkage | [Lecture 2](lectures/lecture2/lecture2.qmd) | [Script Part 1](lectures/lecture2/lecture2_part1.R) / [Script Part 2](lectures/lecture2/lecture2_part2.R) |
+| **Day 3** | Tree-Based Models | [Lecture 3](lectures/lecture3/lecture3.qmd) | [Script Part 1](lectures/lecture3/lecture3_part1.R) / [Script Part 2](lectures/lecture3/lecture3_part2.R) |
+| **Day 4** | Deep Learning & Model Comparison | [Lecture 4](lectures/lecture4/lecture4.qmd) | [Script Part 1](lectures/lecture4/lecture4_part1.R) / [Script Part 2](lectures/lecture4/lecture4_part2.R) |
+| **Day 5** | AI Agents in Research | [Lecture 5](lectures/lecture5/lecture5.qmd) | *Discussion Session* |
+
+------------------------------------------------------------------------

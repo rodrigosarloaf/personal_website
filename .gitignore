@@ -9,3 +9,5 @@
 # Ignoring _site
 _site/*
 /.quarto/
+# Ignoring auxiliary html objects from lectures
+*_files/

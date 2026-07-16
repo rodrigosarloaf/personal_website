@@ -1,0 +1,697 @@
+---
+title: "Lecture 2: Regularized Linear Models & Covariance Shrinkage"
+subtitle: "Machine Learning for Macro Forecasting and Financial Econometrics (SIdE 2026)"
+author: "Rodrigo Sarlo"
+date: "July 2026"
+format:
+  html:
+    toc: true
+    toc-float: true
+    code-fold: true
+    code-summary: "Show the Code"
+    code-tools: true
+---
+
+## Overview
+
+Welcome to the second practical session. Today, we focus on shrinkage methods designed for high-dimensional datasets. 
+
+In **Part 1**, we transition from standard OLS models to penalized linear regressions: Lasso, Ridge, and Elastic Net. We recycle the data preparation framework from Lecture 1 to forecast U.S. inflation. We first fit a baseline AR(1) model, and then tune regularized models over time series splits to analyze coefficient sparsity and variable selection. Throughout this process, we introduce new components of the `{tidymodels}` ecosystem.
+
+In **Part 2**, we apply covariance matrix shrinkage to portfolio optimization. When the number of assets $N$ is large relative to sample size $T$, the sample covariance matrix is unstable. We use the `{cvCovEst}` package to implement Ledoit-Wolf linear and non-linear shrinkage estimators. We then apply these covariance matrices to construct a Global Minimum Variance Portfolio (GMVP), and evaluate their out-of-sample risk performance.
+
+---
+
+## Part 1: Lasso, Ridge, and Elastic Net
+
+### 1.1 Mathematical Background
+In high-dimensional settings, where the number of predictors $p$ is large relative to the number of observations $T$, standard Ordinary Least Squares (OLS) estimation fails. 
+
+The fundamental problem is that the matrix of predictors $X$ (of dimension $T \times p$) yields a matrix $X^T X$ (of dimension $p \times p$) that is singular. Consequently, we cannot calculate $(X^T X)^{-1}$, making the OLS estimator undefined. Even when $p$ is slightly less than $T$, but there is high multicollinearity among the predictors, $X^T X$ becomes ill-conditioned, leading to extremely high variance in OLS parameter estimates.
+
+Regularized regression solves this issue by adding a penalty $P(\beta)$ to the OLS loss function:
+
+$$\min_{\beta} \left\{ \frac{1}{2T} \sum_{t=1}^{T} \left( y_{t} - x_t' \beta \right)^2 + \lambda P(\beta) \right\}$$
+
+Where $P(\beta)$ defines the penalty function and $\lambda \ge 0$ determines the regularization strength:
+
+1. **Ridge Regression ($L_2$ Penalty)**: 
+   $$P(\beta) = \frac{1}{2} \sum_{j=1}^{p} \beta_j^2$$
+   Ridge shrinks coefficients towards zero, reducing variance while keeping all variables. Mathematically, it adds a diagonal term to the cross-product matrix, replacing the non-invertible $(X^T X)^{-1}$ with $(X^T X + \lambda I)^{-1}$, which is always invertible for any $\lambda > 0$.
+
+2. **Lasso Regression ($L_1$ Penalty)**:
+   $$P(\beta) = \sum_{j=1}^{p} |\beta_j|$$
+   Lasso forces some coefficients to be exactly zero, performing automatic variable selection and producing sparse, interpretable models even when $p > T$.
+
+3. **Elastic Net Regression**:
+   $$P(\beta) = \alpha \sum_{j=1}^{p} |\beta_j| + \frac{1-\alpha}{2} \sum_{j=1}^{p} \beta_j^2$$
+   Elastic Net combines the $L_1$ and $L_2$ penalties, where $\alpha \in [0, 1]$ represents the mixture parameter. This allows it to perform variable selection like Lasso while retaining the ability of Ridge to handle highly correlated groups of predictors.
+
+---
+
+### 1.2 Recycling Data & Setup from Lecture 1
+We load the train/validation dataset constructed in the first session (holding out the last 48 months of data for final model comparison in later lectures), define the rolling window splits, and prepare our base preprocessing recipe by recycling the designs and objects from our previous lecture.
+
+::: {.panel-tabset}
+
+##### Splits & Preprocessing
+```r
+library(tidyverse)
+library(tidymodels)
+
+# Load the train/validation dataset from Lecture 1
+treated_data <- read_csv("data/train_val_fredmd.csv")
+
+# Set up rolling window resamples (30 years training, 1 month evaluation)
+folds <- rolling_origin(
+  treated_data,
+  initial = 360,
+  assess = 1,
+  cumulative = FALSE
+)
+
+# Build preprocessing recipe recycling the pipeline from Lecture 1
+fredmd_recipe <- recipe(CPIAUCSL ~ ., data = treated_data) %>%
+  step_rm(date) %>%
+  step_pca(contains("lag1_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag1_PC") %>%
+  step_pca(contains("lag2_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag2_PC") %>%
+  step_pca(contains("lag3_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag3_PC") %>%
+  step_pca(contains("lag4_"),
+           num_comp = 4,
+           keep_original_cols = TRUE,
+           options = list(center = TRUE, scale. = TRUE),
+           prefix = "lag4_PC") %>%
+  step_zv(d200811)
+```
+:::
+
+---
+
+### 1.3 Baseline Model: AR(1) via `{tidymodels}`
+
+Before fitting regularized models that require hyperparameter tuning, we establish an AR(1) as our baseline. A key advantage of the `{tidymodels}` framework is its modularity: we can establish a baseline preprocessing pipeline and easily append model-specific steps or swap out model specifications and engines while keeping the same resampling strategy constant.
+
+This section utilizes several new packages in the `{tidymodels}` ecosystem: `{parsnip}` to specify the OLS linear regression model (`linear_reg()` with the `"lm"` engine), `{workflows}` to bundle the recipe and the model specification together, and `{tune}` to evaluate the workflow out-of-sample across the rolling-window folds generated by `{rsample}`. To build intuition, we first show how to extract a single time series split to fit the model and generate out-of-sample predictions, before scaling up to evaluate the model across all splits using `fit_resamples()`.
+
+::: {.panel-tabset}
+
+##### AR(1) Workflow
+```r
+# AR(1) Recipe: We can recycle fredmd_recipe and discard all predictors except the first lag of target (lag1_CPIAUCSL) and the d200811 dummy
+ar_recipe <- fredmd_recipe %>%
+  step_rm(all_predictors(), -contains("lag1_CPIAUCSL"), -contains("d200811"))
+# Inspect the recipe to confirm that we appended the steps
+print(ar_recipe)
+
+# For computational efficiency (avoiding unnecessary PCA calculations from the recycled base recipe), we define a new, targeted recipe from scratch:
+ar_recipe2 <- recipe(CPIAUCSL ~ lag1_CPIAUCSL + d200811, 
+                      data = treated_data) %>% step_zv(d200811)
+print(ar_recipe2)
+
+# Specify OLS linear regression using the `{parsnip}` interface
+ar_spec <- linear_reg() %>%
+  set_engine("lm")
+
+# Bundle into a workflow
+ar_workflow <- workflow() %>%
+  add_recipe(ar_recipe2) %>%
+  add_model(ar_spec)
+# We can inspect the workflow to see the combined recipe and model specification
+print(ar_workflow)
+
+# --- Fitting and Predicting on a Single Resample ---
+# 1. Extract the first split and its relevant slots
+first_split <- folds$splits[[1]]
+train_data <- analysis(first_split)
+test_data <- assessment(first_split)
+
+# 2. Fit the workflow (preprocessing + estimation) on the training (analysis) data of this split
+ar_fit <- fit(ar_workflow, data = train_data)
+# We can inspect the results by simply printing the object
+print(ar_fit)
+# Or call broom::tidy() to return model coefficients in a tibble format
+tidy(ar_fit)
+
+# 3. Obtain predictions on the out-of-sample (assessment) data of this split
+ar_pred <- predict(ar_fit, new_data = test_data) # Returns a tibble with the predictions
+print(ar_pred)
+
+# --- Evaluating across all Resamples ---
+# Evaluate out-of-sample performance across all folds
+ar_results <- fit_resamples(
+  ar_workflow,
+  resamples = folds,
+  metrics = metric_set(rmse, mae),
+  control = control_resamples(save_pred = TRUE, verbose = TRUE)
+)
+
+# Out-of-sample metrics
+print(collect_metrics(ar_results))
+
+# --- Accessing Predictions and Plotting Comparison ---
+# 1. Collect out-of-sample predictions across all folds
+ar_preds <- collect_predictions(ar_results)
+# Inspecting the object
+print(head(ar_preds))
+
+# 2. Join predictions with dates using row indices (.row) from treated_data
+ar_preds_with_dates <- ar_preds %>%
+  inner_join(
+    # We add a row index to treated_data to align with the .row column in predictions
+    treated_data %>% mutate(.row = row_number()) %>% select(.row, date),
+    by = ".row"
+  )
+
+# 3. Generate out-of-sample actual vs. predicted plot
+ar_preds_with_dates %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = CPIAUCSL, color = "Actual"), linewidth = 0.8) +
+  geom_line(aes(y = .pred, color = "Predicted"), linewidth = 0.8, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Out-of-Sample Predictions vs. Actual Inflation",
+    subtitle = "Rolling Window Forecast Comparison for the AR(1) Baseline",
+    x = "Date",
+    y = "CPIAUCSL",
+    color = "Series"
+  ) +
+  theme(legend.position = "top")
+```
+:::
+
+---
+
+### 1.4 Tuning Regularized Regression Models
+
+When we transition from standard OLS to more modern machine learning methods, we introduce hyperparameters: parameters that control the learning process itself (such as the penalty size $\lambda$ or the mixture parameter $\alpha$) and must be tuned to optimize model performance. Unlike standard model parameters that are estimated directly from the training data, hyperparameters are set before the training process begins.
+
+The `{tidymodels}` ecosystem provides a unified, structured approach to manage hyperparameter tuning. It integrates smoothly with the preprocessing recipes and workflows presented earlier: the `{parsnip}` package standardizes model specifications across various engines, the `{dials}` package defines hyperparameter search spaces, and the `{tune}` package manages the grid search over our resampling splits. Finally, to accelerate the tuning process over our 300+ folds, we can register a parallel backend using `{future}` to distribute calculations across multiple CPU cores.
+
+::: {.panel-tabset}
+
+##### 1: Model Specification
+First, we specify the three regression models. As discussed in Section 1.1, Ridge and Lasso are special cases of the Elastic Net penalty, where the `mixture` parameter is fixed at $\alpha=0$ and $\alpha=1$, respectively. 
+
+In `{parsnip}`, we specify all three estimators using the same `linear_reg()` function, but we select a different engine than the one used for the AR(1) baseline. The "engine" refers to the specific R package called to estimate the model (in this case, `{glmnet}`). To denote that a hyperparameter should be optimized during the tuning phase rather than fixed, we assign it the `tune()` placeholder.
+
+```r
+# 1. Ridge Regression Spec (mixture = 0)
+ridge_spec <- linear_reg(
+  penalty = tune(), 
+  mixture = 0
+) %>%
+  set_engine("glmnet")
+
+# 2. Lasso Regression Spec (mixture = 1)
+lasso_spec <- linear_reg(
+  penalty = tune(), 
+  mixture = 1
+) %>%
+  set_engine("glmnet")
+
+# 3. Elastic Net Regression Spec (both parameters tuned)
+elnet_spec <- linear_reg(
+  penalty = tune(), 
+  mixture = tune()
+) %>%
+  set_engine("glmnet")
+
+# The translate() function exhibits the (template) code that will actually be sent to the engine
+translate(lasso_spec)
+```
+
+##### 2: Hyperparameter Grids with `{dials}`
+
+The `{dials}` package helps us define the hyperparameter search spaces when tuning our models. In essence, `{dials}` contains helper functions that define the parameter ranges and grid scales for any parameter flagged with the `tune()` placeholder. Inspect the manual of the `penalty()` function, for instance.
+
+For Ridge and Lasso, the hyperparameter search space is one-dimensional because the mixture parameter is fixed, meaning we only search over a grid of length 50 for the `penalty` parameter (constructed on a log10 scale, as the default for `{glmnet}`). For the Elastic Net model, we define a two-dimensional grid of 50 combinations by crossing 10 values of `penalty` with 5 values of `mixture`.
+
+> **Note:** Our hyperparameter tuning procedure differs from the one in Medeiros et al. (2021). While we optimize the regularization parameters ($\lambda$) and mixture weights ($\alpha$) out-of-sample using rolling-origin cross-validation (minimizing RMSE on the assessment folds), Medeiros et al. (2021) select the optimal hyperparameters in-sample by minimizing the Bayesian Information Criterion (BIC) for each window.
+
+```r
+# Create grid for Ridge and Lasso (1D)
+grid_1d <- grid_regular(
+  penalty(),
+  levels = 50 # Specifying how many equally spaced values to use in the grid
+)
+
+# Create grid for Elastic Net (2D)
+grid_2d <- grid_regular(
+  penalty(),
+  mixture(range = c(0.001, 0.999)), # Avoiding Ridge and Lasso as special cases
+  levels = c(10, 5) # We can pass different numbers of evaluations for each hyperparameter
+)
+
+# Again, note that a tibble is returned
+print(grid_2d)
+
+```
+
+##### 3: Model Tuning
+
+We now combine our specifications and recipe into workflows and execute the hyperparameter search sequentially over our rolling splits using the `tune_grid()` function.
+
+Note the difference between the functions used for the AR(1) and here: while `fit_resamples()` evaluates a single fixed model across splits, `tune_grid()` evaluates multiple configurations - one for each hyperparameter combination in the grid - to find the optimal model.
+
+```r
+# 1. Setup Workflows
+# We get back to `fredmd_recipe` now
+ridge_wf <- workflow() %>% add_recipe(fredmd_recipe) %>% add_model(ridge_spec)
+lasso_wf <- workflow() %>% add_recipe(fredmd_recipe) %>% add_model(lasso_spec)
+elnet_wf <- workflow() %>% add_recipe(fredmd_recipe) %>% add_model(elnet_spec)
+
+# 2. Tune Ridge Regression
+ridge_results <- tune_grid(
+  ridge_wf,
+  resamples = folds,
+  grid = grid_1d,
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE)
+)
+
+# 3. Tune Lasso Regression
+lasso_results <- tune_grid(
+  lasso_wf,
+  resamples = folds,
+  grid = grid_1d,
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE)
+)
+
+# 4. Tune Elastic Net Regression
+elnet_results <- tune_grid(
+  elnet_wf,
+  resamples = folds,
+  grid = grid_2d,
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE)
+)
+
+```
+
+##### Optional: Parallel Tuning
+Tuning multiple hyperparameter configurations across a large number of resamples is computationally demanding. Fortunately, `{tidymodels}` makes it easy to parallelize this process. The `tune_grid()` function automatically utilizes any registered parallel cluster backend under the hood, requiring no modifications to the main model-fitting code. Below, we show how to register a parallel backend using the `{future}` package directly to accelerate our grid search.
+
+```r
+library(future)
+
+# Register future parallel backend
+all_cores <- parallel::detectCores()
+# Some cores are left free for system stability
+plan(multisession, workers = all_cores - 4)
+
+# Tune Ridge, Lasso, and Elastic Net in parallel
+ridge_results <- tune_grid(ridge_wf, 
+  resamples = folds, grid = grid_1d, 
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE))
+lasso_results <- tune_grid(lasso_wf, 
+  resamples = folds, grid = grid_1d, 
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE))
+elnet_results <- tune_grid(elnet_wf, 
+  resamples = folds, grid = grid_2d, 
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE))
+
+# Reset to sequential execution when finished
+plan(sequential)
+```
+
+##### 4: Saving Results
+Finally, we save the baseline and tuned regularized model results, along with the data splits and recipe, to disk as an `.RData` file. This allows us to load them in future lectures to compare regularized linear models against other machine learning algorithms (such as tree-based models and neural networks).
+
+```r
+# Save baseline and regularized tuning results for future lectures
+save(
+  ar_results, 
+  ridge_results, 
+  lasso_results, 
+  elnet_results, 
+  folds, 
+  fredmd_recipe, 
+  ar_recipe2,
+  ar_spec,
+  ar_workflow,
+  ridge_spec,
+  ridge_wf,
+  lasso_spec,
+  lasso_wf,
+  elnet_spec,
+  elnet_wf,
+  file = "data/recycled_objects.RData"
+)
+```
+
+Due to time constraints in this session, we will proceed with analyzing and comparing the tuning results across models in our next class.
+
+:::
+
+#### Coefficient Sparsity & Variable Selection
+
+To demonstrate how regularization yields coefficient sparsity and performs automatic variable selection, we fit a Lasso model to the full train/validation dataset using a manually selected penalty of $\lambda = 0.000212$ (anticipating the optimal value we systematically identify in the next class).
+
+When processing the results, we employ one new function: `extract_fit_parsnip()` to extract the trained model. We show that extracting the fit allows us to access the raw underlying engine object (`glmnet`), enabling us to call engine-specific methods like `plot()` to inspect the regularization path.
+
+```r
+# 1. Specify a Lasso model with a manually selected penalty
+lasso_fixed_spec <- linear_reg(
+  penalty = 0.000212, 
+  mixture = 1
+) %>%
+  set_engine("glmnet")
+
+fixed_wf <- workflow() %>% 
+  add_recipe(fredmd_recipe) %>% 
+  add_model(lasso_fixed_spec)
+
+# 2. Fit the model to the train/validation dataset
+final_fit <- fit(fixed_wf, data = tail(treated_data, 360))
+
+# 3. Extract the underlying glmnet object and plot the coefficient path
+# Calling extract_fit_parsnip() returns the parsnip wrapper, and accessing the $fit
+# slot gives us direct access to the raw glmnet object for engine-specific plots.
+raw_glmnet <- extract_fit_parsnip(final_fit)$fit
+plot(raw_glmnet, xvar = "lambda", label = TRUE)
+
+# 4. Extract and clean coefficient estimates
+# We use extract_fit_parsnip() combined with tidy() to return coefficients in a tibble.
+coefficients <- extract_fit_parsnip(final_fit) %>%
+  tidy() %>%
+  filter(term != "(Intercept)") %>%
+  mutate(abs_estimate = abs(estimate)) %>%
+  arrange(desc(abs_estimate))
+
+# 5. Filter and display non-zero coefficients
+non_zero_coefs <- coefficients %>% filter(estimate != 0)
+print(head(non_zero_coefs, 20))
+# Printing the fraction of non-zero coefficients
+print(round(nrow(non_zero_coefs)/nrow(coefficients),3))
+
+# 6. Plot top 20 non-zero coefficients
+non_zero_coefs %>%
+  slice_head(n = 20) %>%
+  ggplot(aes(x = estimate, y = reorder(term, estimate))) +
+  geom_col(fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Top 20 Lasso Coefficient Estimates (Fixed Model)",
+    subtitle = "Sparsity and Variable Selection on FRED-MD Predictors",
+    x = "Coefficient Estimate",
+    y = "Predictor Variable"
+  )
+```
+
+---
+
+## Part 2: Linear and Non-linear Covariance Shrinkage
+
+### 2.1 Mathematical Background
+Estimating the covariance matrix $\Sigma$ is central to portfolio construction. However, when the number of assets $N$ is large relative to the number of time series observations $T$, the sample covariance matrix $S$:
+
+$$S = \frac{1}{T-1} \sum_{t=1}^{T} (r_t - \bar{r})(r_t - \bar{r})'$$
+
+is singular, meaning it has no unique inverse $S^{-1}$. Without an invertible covariance matrix, standard mean-variance optimization and the construction of minimum-variance portfolios cannot be computed. Even when $N$ is slightly smaller than $T$, the sample covariance matrix is highly unstable (ill-conditioned), leading to extreme out-of-sample portfolio risk.
+
+Ledoit and Wolf propose regularizing the sample covariance matrix by pulling it toward a structured target matrix $F$ (such as the identity matrix or a constant correlation matrix):
+
+$$\Sigma_{\text{shrunk}} = \delta F + (1 - \delta) S$$
+
+Where $\delta \in [0, 1]$ is the shrinkage intensity parameter:
+
+- Linear Shrinkage: pulls all sample eigenvalues toward the target uniformly by applying a single linear shrinkage intensity $\delta$.
+- Non-linear Shrinkage: shrinks individual eigenvalues non-linearly using a transformation based on random matrix theory, offering superior performance in highly structured financial environments.
+
+The covariance estimators studied in this session are static. Under this framework, Ledoit and Wolf propose estimators for the optimal shrinkage parameter(s) derived from a single historical sample realization of the return matrix. For further details and dynamic extensions, see Ledoit and Wolf (2022).
+
+---
+
+### 2.2 Covariance Estimation using `{cvCovEst}`
+To resolve the instability and rank-deficiency issues of the sample covariance matrix, we use the `{cvCovEst}` package, which provides a comprehensive library for cross-validated and shrinkage-based covariance estimation in R. 
+
+We begin by aggregating daily close prices from the Dow Jones Industrial Average (DJIA) index components into monthly asset returns, and computing three distinct estimators we will compare in this part of the lecture:
+
+1. Sample Covariance: `cov()`.
+2. Ledoit-Wolf Linear Shrinkage: `linearShrinkLWEst()`.
+3. Ledoit-Wolf Non-linear Shrinkage: `nlShrinkLWEst()`.
+
+::: {.panel-tabset}
+
+##### 1: Data Preparation
+```r
+library(tidyverse)
+library(cvCovEst)
+
+# Load daily prices from Lecture 1
+prices <- read_csv("data/djia_prices.csv")
+
+# Confirm there are no missing values
+# Safety check before calling drop_na() later
+anyNA(prices)
+
+# Aggregate to monthly returns
+monthly_returns <- prices %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(symbol, month) %>%
+  filter(date == max(date)) %>%
+  ungroup() %>%
+  group_by(symbol) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(returns = adjusted_close / lag(adjusted_close) - 1) %>%
+  drop_na(returns) %>%
+  select(symbol, date = month, returns)
+
+# Pivot returns to a wide matrix format
+returns_wide <- monthly_returns %>%
+  pivot_wider(names_from = symbol, values_from = returns) %>%
+  drop_na()
+
+dates <- returns_wide$date
+returns_matrix <- returns_wide %>% select(-date) %>% as.matrix()
+
+# Save the aggregated monthly returns to disk for future use
+write_csv(monthly_returns, "data/monthly_returns.csv")
+```
+
+##### 2: Covariance Matrix Estimation
+
+Note that the syntax of the compared methods is exactly the same.
+
+```r
+# Sample Covariance Matrix
+S <- cov(returns_matrix)
+
+# Ledoit-Wolf Linear Shrinkage
+cov_linear <- linearShrinkLWEst(returns_matrix)
+
+# Ledoit-Wolf Non-linear Shrinkage
+cov_nonlinear <- nlShrinkLWEst(returns_matrix)
+```
+
+##### 3: Correlation Heatmap
+
+We can compare the difference in the resulting estimates by creating heatmaps:
+
+```r
+# 1. Define a helper function to convert to long format correlation data
+# (We explicitly assign row and column names because some estimators, like nlShrinkLWEst, drop them)
+get_cor_long <- function(cov_matrix, estimator_name) {
+  colnames(cov_matrix) <- colnames(returns_matrix)
+  rownames(cov_matrix) <- colnames(returns_matrix)
+  
+  cov2cor(cov_matrix) %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "Asset1") %>%
+    pivot_longer(-Asset1, names_to = "Asset2", values_to = "Correlation") %>%
+    mutate(Estimator = estimator_name)
+}
+
+# 2. Combine all three estimators into a single dataset
+all_cor_long <- bind_rows(
+  get_cor_long(S, "1. Sample Covariance"),
+  get_cor_long(cov_linear, "2. Ledoit-Wolf Linear"),
+  get_cor_long(cov_nonlinear, "3. Ledoit-Wolf Non-linear")
+)
+
+# 3. Plot the correlation heatmaps side-by-side
+all_cor_long %>%
+  ggplot(aes(x = Asset1, y = Asset2, fill = Correlation)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "blue", 
+    mid = "white", 
+    high = "red", 
+    limits = c(-1, 1)
+  ) +
+  facet_wrap(~ Estimator, ncol = 3) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6),
+    strip.text = element_text(face = "bold", size = 10),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Asset Correlation Heatmap Comparison",
+    subtitle = "Comparing Sample Covariance vs. Ledoit-Wolf Linear and Non-linear Shrinkage",
+    x = "",
+    y = "",
+    fill = "Correlation"
+  )
+```
+:::
+
+---
+
+### 2.3 Global Minimum Variance Portfolio (GMVP)
+To evaluate the practical impact of covariance matrix regularization on asset allocation, we construct a Global Minimum Variance Portfolio (GMVP). The GMVP is a pure risk-minimization portfolio that does not rely on expected return estimates, making it uniquely sensitive to the quality of the covariance input:
+
+$$\min_{w} w' \Sigma w \quad \text{subject to} \quad w' \mathbf{1} = 1$$
+
+The analytical solution for the optimal weights vector is:
+
+$$w_{\text{GMVP}} = \frac{\Sigma^{-1} \mathbf{1}}{\mathbf{1}' \Sigma^{-1} \mathbf{1}}$$
+
+If the input covariance matrix $\Sigma$ is singular or ill-conditioned, computing its inverse $\Sigma^{-1}$ using standard R solvers (like `solve(sigma)`) will fail or lead to numerical instability. This instability manifests in the portfolio weights as extreme positive (long) and negative (short) allocations, which are highly sensitive to small changes in input data. Regularizing the matrix mitigates this numerical instability, yielding more robust and diversified portfolio weights.
+
+::: {.panel-tabset}
+
+##### Portfolio Optimization
+```r
+# Function to compute GMVP weights
+compute_gmvp <- function(sigma) {
+  ones <- rep(1, ncol(sigma))
+  sigma_inv <- MASS::ginv(sigma) # Using the pseudo-inverse if the provided matrix is singular
+  weights <- (sigma_inv %*% ones) / as.numeric(t(ones) %*% sigma_inv %*% ones)
+  return(as.vector(weights))
+}
+
+# Compute weights
+w_sample <- compute_gmvp(S)
+w_linear <- compute_gmvp(cov_linear)
+w_nonlinear <- compute_gmvp(cov_nonlinear)
+
+# Pivot weights to long format for plotting
+weights_long <- tibble(
+  Asset = colnames(returns_matrix),
+  `1. Sample Covariance` = w_sample,
+  `2. Ledoit-Wolf Linear` = w_linear,
+  `3. Ledoit-Wolf Non-linear` = w_nonlinear
+) %>%
+  pivot_longer(-Asset, names_to = "Estimator", values_to = "Weight")
+
+# Plot weights allocation comparison
+weights_long %>%
+  ggplot(aes(x = Asset, y = Weight, fill = Estimator)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~ Estimator, ncol = 3) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 8),
+    strip.text = element_text(face = "bold", size = 10)
+  ) +
+  labs(
+    title = "GMVP Portfolio Allocations Comparison",
+    subtitle = "Comparing Asset Weights across Covariance Estimators (Ordered by Sample Weights)",
+    x = "Asset",
+    y = "Portfolio Weight"
+  )
+```
+:::
+
+---
+
+### 2.4 Out-of-Sample Portfolio Backtesting
+While comparing in-sample portfolio weights is illustrative, the true test of a covariance estimator is its out-of-sample performance under realistic historical conditions. We conduct a rolling-window historical simulation using a training window of $T_{\text{train}} = 24$ months. We intentionally set $N>T$ to trigger the singularity problem ($N = 30$ assets and $T = 24$ monthly observations), forcing the sample covariance matrix to be singular and non-invertible. In the code above, the pseudo-inverse is used when the sample covariance matrix $S$ is provided as input.
+
+The backtesting exercise evaluates the portfolio performance out-of-sample by implementing the following procedure at each rolling step $t$:
+
+1. We extract the historical returns for all assets over the past 24 months (the in-sample estimation window).
+2. We estimate the covariance matrix $\Sigma_t$ using our three candidate estimators.
+3. We compute the optimal GMVP weights vector $w_t$.
+4. We evaluate the portfolio's realized performance in the out-of-sample month $t+1$ by multiplying $w_t$ by the realized out-of-sample asset returns vector $r_{t+1}$.
+
+After rolling through the historical sample, we aggregate these realized returns to compare the annualized volatility (risk) and plot the cumulative realized return to evaluate how covariance regularization translates into risk reduction out-of-sample.
+
+::: {.panel-tabset}
+
+##### 1: Backtest Simulation
+```r
+window_size <- 24
+n_forecasts <- nrow(returns_matrix) - window_size
+
+portfolio_returns <- tibble(
+  Date = dates[(window_size + 1):length(dates)],
+  Sample = numeric(n_forecasts),
+  Linear = numeric(n_forecasts),
+  Nonlinear = numeric(n_forecasts)
+)
+
+for (i in 1:n_forecasts) {
+  train_idx <- i:(i + window_size - 1)
+  test_idx <- i + window_size
+  
+  X_train <- returns_matrix[train_idx, ]
+  r_test <- returns_matrix[test_idx, ]
+  
+  # Estimations
+  S_roll <- cov(X_train)
+  cov_linear_roll <- linearShrinkLWEst(X_train)
+  cov_nonlinear_roll <- nlShrinkLWEst(X_train)
+  
+  # GMVP Weights
+  w_s <- compute_gmvp(S_roll)
+  w_l <- compute_gmvp(cov_linear_roll)
+  w_nl <- compute_gmvp(cov_nonlinear_roll)
+  
+  # Realized returns
+  portfolio_returns$Sample[i] <- sum(w_s * r_test)
+  portfolio_returns$Linear[i] <- sum(w_l * r_test)
+  portfolio_returns$Nonlinear[i] <- sum(w_nl * r_test)
+}
+```
+
+##### 2: Risk Results & Plots
+```r
+# Evaluate annualized volatility (risk)
+portfolio_risk <- portfolio_returns %>%
+  pivot_longer(-Date, names_to = "Estimator", values_to = "Return") %>%
+  group_by(Estimator) %>%
+  summarize(
+    Mean_Return = mean(Return) * 12,
+    OOS_Volatility = sd(Return) * sqrt(12)
+  )
+
+print(portfolio_risk)
+
+# Plot realized cumulative returns
+portfolio_returns %>%
+  pivot_longer(-Date, names_to = "Estimator", values_to = "Return") %>%
+  group_by(Estimator) %>%
+  mutate(Cumulative_Return = cumprod(1 + Return) - 1) %>%
+  ggplot(aes(x = Date, y = Cumulative_Return, color = Estimator)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Out-of-Sample GMVP Performance",
+    subtitle = "Comparing Covariance Estimators: Sample vs. Ledoit-Wolf Shrinkage",
+    x = "Date",
+    y = "Cumulative Return",
+    color = "Estimator"
+  )
+```
+:::

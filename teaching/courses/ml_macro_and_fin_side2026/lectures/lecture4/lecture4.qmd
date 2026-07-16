@@ -1,0 +1,603 @@
+---
+title: "Lecture 4: Deep Learning & Model Comparison"
+subtitle: "Machine Learning for Macro Forecasting and Financial Econometrics (SIdE 2026)"
+author: "Rodrigo Sarlo"
+date: "July 2026"
+format:
+  html:
+    toc: true
+    toc-float: true
+    code-fold: true
+    code-summary: "Show the Code"
+    code-tools: true
+---
+
+## Overview
+
+Welcome to the fourth practical session. Today, we transition to Deep Learning and perform a comprehensive comparative analysis of the various models trained throughout this course.
+
+In **Part 1**, we introduce Feedforward Neural Networks. We demonstrate how to specify, train, and tune these networks in R using the `{brulee}` package, a PyTorch-backed engine for `{tidymodels}`. We also discuss network design, including hidden layers, activation functions, and regularization techniques like dropout and weight decay.
+
+In **Part 2**, we focus on model evaluation and comparison. We compile out-of-sample predictions from our regularized linear models, tree ensembles, and neural networks to compare them against two baseline models: the AR(1) model built in our second lecture and a naïve Random Walk forecast, which is surprisingly hard to beat in practice. We cover how to aggregate forecasts and compute evaluation metrics (RMSE, MAE, directional accuracy), and we implement the Diebold-Mariano test to verify if the machine learning models yield statistically significant improvements over the benchmarks.
+
+---
+
+## Part 1: Deep Learning in the Tidymodels Environment
+
+### 1.1 Mathematical Background
+
+A Feedforward Neural Network, or Multilayer Perceptron (MLP), represents a non-linear mapping from an input vector $x \in \mathbb{R}^p$ to a target output $y$. This mapping is constructed through a series of hierarchical layers.
+
+#### Network Architecture
+For a network with $L$ layers (where layer $0$ is the input and layer $L$ is the output), the activation vector $a^{(l)}$ at layer $l$ is calculated recursively as:
+
+$$z^{(l)} = W^{(l)} a^{(l-1)} + b^{(l)}$$
+$$a^{(l)} = g^{(l)}\left(z^{(l)}\right)$$
+
+where:
+
+* $W^{(l)}$ is the matrix of weights for layer $l$.
+* $b^{(l)}$ is the vector of biases for layer $l$.
+* $g^{(l)}(\cdot)$ is an element-wise activation function.
+* $a^{(0)} = x$ is the initial input vector.
+
+#### Activation Functions
+Activation functions introduce non-linearities into the network, allowing it to approximate arbitrary continuous functions. Three of the most common activation functions are summarized below:
+
+| Activation Function | Equation | Output Range |
+|:---|:---|:---|
+| **ReLU** (Rectified Linear Unit)* | $g(z) = \max(0, z)$ | $[0, \infty)$ |
+| **Sigmoid** | $g(z) = \frac{1}{1 + e^{-z}}$ | $(0, 1)$ |
+| **Tanh** (Hyperbolic Tangent) | $g(z) = \tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}}$ | $(-1, 1)$ |
+
+\* *Note: ReLU is widely used in hidden layers due to its simplicity and computational efficiency; it also mitigates the vanishing gradient problem.*
+
+> The complete list of supported activations in `{brulee}` can be retrieved using `brulee_activations()`.
+
+#### Input Standardization & the Vanishing Gradient Problem
+Training deep neural networks is often hindered by the vanishing gradient problem. For saturating activations like sigmoid and hyperbolic tangent, the derivative approaches zero as input magnitudes increase:
+
+$$\frac{d}{dz} g(z) \approx 0 \quad \text{for } |z| \gg 0$$
+
+Without standardization, inputs can easily fall into these saturated regions. Consequently, gradients computed via backpropagation shrink to zero, halting early-layer learning. Standardizing predictors is therefore crucial to keep inputs within the high-gradient zones, ensuring stable parameter updates and faster convergence.
+
+#### Regularization
+Deep neural networks can contain thousands or millions of parameters, making them highly susceptible to overfitting. To prevent this, two primary regularization techniques are used:
+
+1. **L2 Regularization (Weight Decay)**: Adds a penalty term proportional to the sum of squared weights to the loss function, shrinking parameters toward zero:
+   $$\mathcal{L}_{reg} = \mathcal{L}_{loss} + \lambda \sum_{l=1}^{L} \|W^{(l)}\|_F^2$$
+   where $\lambda$ is the penalty parameter.
+2. **Dropout**: Randomly deactivates a fraction $p$ of neurons during each training step, forcing the network to learn redundant representations.
+
+---
+
+### 1.2 Model Specification & Hyperparameter Tuning
+
+Using the `{torch}`-backed `{brulee}` engine, we can train and evaluate neural networks directly within R's `{tidymodels}` ecosystem. Although `{tidymodels}` does not natively support tuning MLPs with an arbitrary number of hidden layers, we can easily work around this by defining separate workflows. Here, we define a single-hidden-layer model via the `"brulee"` engine and a two-hidden-layer model via `"brulee_two_layer"`, the latter of which exposes the engine-specific `hidden_units_2` parameter for tuning. In addition to these classical MLPs, `{brulee}` also supports specialized tabular models (like AutoInt, SAINT, and Chronos2), but for this lab, we tune our two standalone configurations independently.
+
+>**Note:** For more customizable neural network architectures, the `{kerasnip}` package provides an integration between `{keras}` and the `{tidymodels}` framework. It enables the dynamic creation of `{parsnip}` model specifications for Keras models, allowing you to build, tune, and evaluate complex network structures directly within the tidy ecosystem. However, as with `{xgboost}` in the previous lecture, gaining greater control over model specification comes with a drawback: it requires us to sacrifice part of the seamless integration of processing and modeling offered by the standard `{tidymodels}` pipeline.
+
+::: {.panel-tabset}
+
+##### 1: Specification
+```r
+library(tidyverse)
+library(tidymodels)
+library(brulee)
+
+# 1. Single-layer MLP specification
+mlp_1_spec <- mlp(
+  epochs = 50, # Reduced number for training efficiency
+  hidden_units = tune(),
+  penalty = tune(),
+  learn_rate = tune(),
+  activation = tune()
+) %>%
+  # Turning off the validation - randomly assigns 0.1 by default
+  set_engine("brulee", validation = 0) %>%
+  set_mode("regression")
+
+# 2. Two-layer MLP specification
+mlp_2_spec <- mlp(
+  epochs = 50,
+  hidden_units = tune(),
+  penalty = tune(),
+  learn_rate = tune(),
+  activation = tune()
+) %>%
+  # Note how `hidden_units_2` is passed below
+  set_engine("brulee_two_layer", hidden_units_2 = tune(), validation = 0) %>%
+  set_mode("regression")
+```
+
+##### 2: Workflow Bundle
+The most common normalization techniques in `{recipes}` are `step_normalize()` (standardization to zero mean and unit variance) and `step_range()` (min-max scaling to a specified boundary, typically $[0, 1]$). Here, we explicitly implement `step_normalize()` as part of our preprocessing recipe and create separate workflows for both models:
+```r
+# Load pre-saved objects from earlier lectures
+load("data/recycled_objects.RData")
+treated_data <- read_csv("data/train_val_fredmd.csv")
+
+# Append input standardization to the existing recipe
+mlp_recipe <- fredmd_recipe %>%
+  step_normalize(all_predictors())
+
+# Workflow for single-layer MLP
+mlp_1_workflow <- workflow() %>%
+  add_recipe(mlp_recipe) %>%
+  add_model(mlp_1_spec)
+
+# Workflow for two-layer MLP
+mlp_2_workflow <- workflow() %>%
+  add_recipe(mlp_recipe) %>%
+  add_model(mlp_2_spec)
+```
+
+##### 3: Grid Design
+Since evaluating a full regular grid (yielding 81 and 243 combinations) across 300+ rolling-window resamples is extremely computationally intensive, we use random search (`grid_random()`) to select 10 random parameter configurations. This keeps the computational requirements manageable while still exploring the parameter space.
+```r
+# Random grid design for single-layer MLP
+set.seed(333)
+mlp_1_grid <- grid_random(
+  hidden_units(),
+  penalty(),
+  learn_rate(),
+  activation(values = c("relu", "tanh", "sigmoid")),
+  size = 10
+)
+
+# Random grid design for two-layer MLP
+set.seed(444)
+mlp_2_grid <- grid_random(
+  hidden_units(),
+  hidden_units_2 = hidden_units(),
+  penalty(),
+  learn_rate(),
+  activation(values = c("relu", "tanh", "sigmoid")),
+  size = 10
+)
+```
+
+##### 4: Grid Execution
+```r
+# Optional parallel execution
+# library(future)
+# plan(multisession, workers = parallel::detectCores() - 4)
+
+# Execute grid tuning for single-layer MLP
+set.seed(333)
+mlp_1_results <- tune_grid(
+  mlp_1_workflow,
+  resamples = folds,
+  grid = mlp_1_grid,
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE)
+)
+
+# Execute grid tuning for two-layer MLP
+set.seed(444)
+mlp_2_results <- tune_grid(
+  mlp_2_workflow,
+  resamples = folds,
+  grid = mlp_2_grid,
+  metrics = metric_set(rmse, mae),
+  control = control_grid(save_pred = TRUE, verbose = TRUE)
+)
+
+# plan(sequential) # Reset parallel backend
+
+# Save the tuned model objects
+save(mlp_1_results, mlp_2_results, mlp_1_spec, mlp_2_spec, mlp_1_workflow, mlp_2_workflow, mlp_recipe, file = "data/tuned_mlps.RData")
+```
+:::
+
+---
+
+### 1.3 Model Selection & Diagnostics
+
+Once the neural network tuning is finished, we evaluate the results, select the best parameters, and finalize the workflow for our out-of-sample comparison.
+
+::: {.panel-tabset}
+
+##### 1: Diagnostics
+```r
+# Plot metrics across hyperparameters for the two-layer network
+autoplot(mlp_2_results)
+```
+
+##### 2: Select Best
+To compare our deep learning results with the other models in Part 2, we evaluate the validation performance of both the single-layer and two-layer architectures and select the best overall configuration based on RMSE:
+```r
+# Select the best configuration for both architectures
+best_mlp_1 <- select_best(mlp_1_results, metric = "rmse")
+print(best_mlp_1)
+
+best_mlp_2 <- select_best(mlp_2_results, metric = "rmse")
+print(best_mlp_2)
+```
+
+##### 3: Finalize & Fit
+```r
+# Extract the best validation RMSE for each model structure
+rmse_1 <- show_best(mlp_1_results, metric = "rmse", n = 1)$mean
+rmse_2 <- show_best(mlp_2_results, metric = "rmse", n = 1)$mean
+
+# Select and finalize the workflow with the lowest validation RMSE
+if (rmse_1 < rmse_2) {
+  final_mlp_wf <- finalize_workflow(mlp_1_workflow, best_mlp_1)
+} else {
+  final_mlp_wf <- finalize_workflow(mlp_2_workflow, best_mlp_2)
+}
+
+# Fit the chosen finalized workflow to the train/validation dataset
+set.seed(999)
+final_mlp_fit <- fit(final_mlp_wf, data = tail(treated_data, 360))
+print(final_mlp_fit)
+```
+:::
+
+>**Note:** Neural network optimization is susceptible to multiple local optima, making final predictions highly dependent on random weight initializations and training algorithms. A popular strategy to mitigate this instability is model averaging (bagging). In the `{tidymodels}` ecosystem, you can use the `bag_mlp()` function, which trains an ensemble of neural networks over bootstrapped samples. However, this ensemble technique is currently restricted to single-hidden-layer MLPs.
+
+---
+
+## Part 2: Model Comparison & Wrapping Up
+
+### 2.1 Mathematical Background
+
+To formally determine whether a given model provides a statistically significant improvement over another, we use the Diebold-Mariano (DM) test (Diebold and Mariano, 1995).
+
+#### Diebold-Mariano (DM) Test
+Let $y_t$ represent the actual value at time $t$, and let $\hat{y}_{1,t}$ and $\hat{y}_{2,t}$ be the forecasts generated by two competing models. The forecast errors are:
+
+$$e_{1,t} = y_t - \hat{y}_{1,t} \quad \text{and} \quad e_{2,t} = y_t - \hat{y}_{2,t}$$
+
+We define the loss differential $d_t$ using a loss function $L(\cdot)$:
+
+$$d_t = L(e_{1,t}) - L(e_{2,t})$$
+
+The null hypothesis of equal predictive accuracy states that the expected loss differential is zero:
+
+$$H_0: \mathbb{E}[d_t] = 0$$
+
+Assuming that the loss differential process $d_t$ is covariance stationary, the DM test statistic is:
+
+$$DM = \frac{\bar{d}}{\sqrt{\hat{\sigma}_{\bar{d}}^2}} \xrightarrow{d} \mathcal{N}(0, 1)$$
+
+where:
+
+* $\bar{d} = \frac{1}{T} \sum_{t=1}^{T} d_t$ is the sample mean of the loss differential.
+* $\hat{\sigma}_{\bar{d}}^2$ is a consistent estimator of the asymptotic variance of $\bar{d}$, usually computed using a Heteroskedasticity and Autocorrelation Consistent (HAC) estimator.
+
+---
+
+### 2.2 Out-of-Sample Performance Comparison
+
+We load the out-of-sample datasets, retrieve the tuned configurations for the regularized linear models, tree-based models, and neural networks, and fit the finalized models to generate holdout predictions. We also compute two baseline forecasts to assess if the studied methods provide gains in terms of accuracy out-of-sample: the standard autoregressive AR(1) model and the naïve Random Walk (RW).
+
+The Random Walk (RW) represents one of the classic benchmarks for time series forecasting. Under the RW hypothesis, the best prediction of a future value is simply the most recently observed value: $\hat{y}_{t+h|t} = y_t$. Despite its extreme simplicity, this model is surprisingly difficult to beat in empirical macroeconomic forecasting.
+
+::: {.panel-tabset}
+
+##### 0: Auxiliary Forecasting Function
+To improve code readability, we define a helper function that assembles the workflow, finalization of hyperparameter values, model fitting, and predicting on the out-of-sample dataset:
+```r
+# Define an auxiliary helper function to finalize workflows and generate rolling out-of-sample predictions
+finalize_and_predict <- function(spec, recipe, results = NULL, last_train_data, test_data, seed) {
+  wf <- workflow() %>%
+    add_recipe(recipe) %>%
+    add_model(spec)
+  
+  if (!is.null(results)) {
+    best_params <- select_best(results, metric = "rmse")
+    wf <- finalize_workflow(wf, best_params)
+  }
+  
+  n_test <- nrow(test_data)
+  window_size <- nrow(last_train_data)
+  predictions <- numeric(n_test)
+  
+  # Combine datasets to maintain a fixed-size rolling window
+  combined_data <- bind_rows(last_train_data, test_data)
+  
+  # Note that we could have used rolling_origin() and fit_resamples() here as well
+  set.seed(seed)
+  for (i in 1:n_test) {
+    # Fixed-size rolling training window
+    active_train <- combined_data[i:(window_size + i - 1), ]
+    
+    fit_model <- fit(wf, data = active_train)
+    predictions[i] <- predict(fit_model, new_data = test_data[i, ]) %>% pull(.pred)
+  }
+  
+  return(predictions)
+}
+```
+
+##### 1: Predictions
+```r
+# Load holdout test dataset and training data
+holdout_data <- read_csv("data/test_fredmd.csv")
+treated_data <- read_csv("data/train_val_fredmd.csv")
+treated_data <- tail(treated_data, 360) # Last train data used during train/validation
+
+# 1. Baseline AR(1) Forecast (re-estimated at each step)
+load("data/recycled_objects.RData") # Load saved tuning results and recipes
+pred_ar1 <- finalize_and_predict(ar_spec, ar_recipe2, results = NULL, treated_data, holdout_data, seed = 1)
+rm(ar_spec, ar_recipe2, ar_workflow, ar_results, folds) # Removing previous objects after using to free memory
+
+# 2. Random Walk (RW) Forecast
+pred_rw <- holdout_data$lag1_CPIAUCSL
+
+# 3. Lasso Regularized Linear Forecast
+pred_lasso <- finalize_and_predict(lasso_spec, fredmd_recipe, lasso_results, treated_data, holdout_data, seed = 2)
+rm(lasso_spec, lasso_wf, lasso_results)
+
+# 4. Ridge Regularized Linear Forecast
+pred_ridge <- finalize_and_predict(ridge_spec, fredmd_recipe, ridge_results, treated_data, holdout_data, seed = 3)
+rm(ridge_spec, ridge_wf, ridge_results)
+
+# 5. Elastic Net Regularized Linear Forecast
+pred_elnet <- finalize_and_predict(elnet_spec, fredmd_recipe, elnet_results, treated_data, holdout_data, seed = 4)
+rm(elnet_spec, elnet_wf, elnet_results)
+
+# 6. Decision Tree Forecast
+load("data/tuned_trees.RData")
+pred_tree <- finalize_and_predict(tree_spec, fredmd_recipe, tree_results, treated_data, holdout_data, seed = 5)
+rm(tree_spec, tree_workflow, tree_results)
+
+# 7. Random Forest Forecast
+load("data/tuned_rf.RData")
+pred_rf <- finalize_and_predict(rf_spec, fredmd_recipe, rf_results, treated_data, holdout_data, seed = 6)
+rm(rf_spec, rf_workflow, rf_results)
+
+# 8. Boosted Trees (XGBoost) Forecast
+load("data/tuned_xgb.RData")
+pred_xgb <- finalize_and_predict(xgb_spec, fredmd_recipe, xgb_results, treated_data, holdout_data, seed = 7)
+rm(xgb_spec, xgb_workflow, xgb_results)
+
+# 9. Multilayer Perceptron (MLP) Forecast
+load("data/tuned_mlps.RData")
+# Pick the best specification structure based on validation RMSE
+rmse_1 <- show_best(mlp_1_results, metric = "rmse", n = 1)$mean
+rmse_2 <- show_best(mlp_2_results, metric = "rmse", n = 1)$mean
+
+if (rmse_1 < rmse_2) {
+  pred_mlp <- finalize_and_predict(mlp_1_spec, mlp_recipe, mlp_1_results, treated_data, holdout_data, seed = 8)
+} else {
+  pred_mlp <- finalize_and_predict(mlp_2_spec, mlp_recipe, mlp_2_results, treated_data, holdout_data, seed = 8)
+}
+rm(mlp_1_spec, mlp_1_workflow, mlp_1_results,
+   mlp_2_spec, mlp_2_workflow, mlp_2_results,
+   mlp_recipe)
+
+# Compile all predictions
+pred_compiled <- holdout_data %>%
+  select(date, actual = CPIAUCSL) %>%
+  mutate(
+    pred_ar1   = pred_ar1,
+    pred_rw    = pred_rw,
+    pred_lasso = pred_lasso,
+    pred_ridge = pred_ridge,
+    pred_elnet = pred_elnet,
+    pred_tree  = pred_tree,
+    pred_rf    = pred_rf,
+    pred_xgb   = pred_xgb,
+    pred_mlp   = pred_mlp
+  )
+```
+
+##### 2: Accuracy Tests
+```r
+library(forecast)
+
+# Define competing models and baseline references
+competing_models <- c("lasso", "ridge", "elnet", "tree", "rf", "xgb", "mlp")
+baselines <- c("ar1", "rw")
+
+# Reshape predictions and compute out-of-sample forecast errors
+errors <- pred_compiled %>%
+  pivot_longer(
+    cols = starts_with("pred_"),
+    names_to = "model",
+    names_prefix = "pred_",
+    values_to = ".pred"
+  ) %>%
+  mutate(error = actual - .pred) %>%
+  select(date, model, error)
+
+# Run Diebold-Mariano tests across all model-baseline pairs
+dm_results <- crossing(
+  model = competing_models,
+  baseline = baselines
+) %>%
+  mutate(
+    p_value = map2_dbl(model, baseline, function(m, b) {
+      err_m <- errors %>% filter(model == m) %>% pull(error)
+      err_b <- errors %>% filter(model == b) %>% pull(error)
+      
+      # Test whether the ML model forecast error is significantly less than the baseline
+      dm <- dm.test(err_m, err_b, alternative = "less", h = 1)
+      dm$p.value
+    })
+  )
+
+# Filter and display only the models where the baseline null hypothesis is rejected (p < 0.05)
+significant_models <- dm_results %>%
+  group_by(model) %>%
+  filter(p_value < 0.05) %>%
+  ungroup() %>% 
+  arrange(baseline, p_value)
+
+print(significant_models)
+```
+
+##### 3: Saving the Results
+```r
+# Save the out-of-sample prediction database and test results
+save(pred_compiled, dm_results, file = "data/holdout_results.RData")
+```
+:::
+
+---
+
+### 2.3 More on Evaluation Metrics & Visualizations
+
+We now aggregate our forecasting results and create comparative visualizations to evaluate model performance over the test period - the last 48 months of the data treated from Lecture 1.
+
+::: {.panel-tabset}
+
+##### 1: RMSE and MAE Comparison
+We compute the Root Mean Squared Error (RMSE) and Mean Absolute Error (MAE) and visualize them to compare the scale of forecasting errors across all models:
+```r
+# Reshape the predictions into long format
+pred_long <- pred_compiled %>%
+  pivot_longer(
+    cols = starts_with("pred_"),
+    names_to = "model",
+    names_prefix = "pred_",
+    values_to = ".pred"
+  )
+
+# Calculate RMSE and MAE grouped by model
+metrics_summary <- pred_long %>%
+  group_by(model) %>%
+  metrics(truth = actual, estimate = .pred) %>%
+  filter(.metric %in% c("rmse", "mae"))
+
+# Plot performance metrics across all models
+metrics_summary %>%
+  mutate(.metric = toupper(.metric)) %>%
+  ggplot(aes(x = reorder(model, .estimate), y = .estimate, fill = model)) +
+  geom_col(show.legend = FALSE, alpha = 0.8) +
+  facet_wrap(~.metric, scales = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Out-of-Sample Accuracy Metrics",
+    x = "Model",
+    y = "Error Metric Value"
+  ) +
+  coord_flip()
+```
+
+##### 2: Forecast vs. Actual
+Plotting the actual series against model forecasts allows us to visually inspect how well the models capture the trajectory and fluctuations of inflation. Here, we plot the forecasts from the 3 best performing models analyzed, and the 2 proposed benchmarks along with the actual inflation series:
+```r
+# Select the top 3 ML models by RMSE (excluding baseline benchmarks)
+top_ml_models <- metrics_summary %>%
+  filter(.metric == "rmse", !model %in% c("ar1", "rw")) %>%
+  arrange(.estimate) %>%
+  slice_head(n = 3) %>%
+  pull(model)
+
+# Plot predicted vs actual time series for the baselines and top ML models
+pred_compiled %>%
+  pivot_longer(
+    cols = all_of(c("actual", "pred_ar1", "pred_rw", paste0("pred_", top_ml_models))),
+    names_to = "series",
+    values_to = "value"
+  ) %>%
+  mutate(
+    series = case_when(
+      series == "actual" ~ "Actual CPI Inflation",
+      series == "pred_ar1" ~ "AR(1) Baseline",
+      series == "pred_rw" ~ "Random Walk (RW) Baseline",
+      TRUE ~ paste0("Model: ", str_to_upper(gsub("pred_", "", series)))
+    )
+  ) %>%
+  ggplot(aes(x = date, y = value, color = series, linetype = series)) +
+  geom_line(linewidth = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Actual Inflation vs. Top Model Forecasts",
+    subtitle = "Comparing the AR(1) and RW baselines against the top 3 machine learning configurations",
+    x = "Date",
+    y = "Inflation Rate",
+    color = "Model/Series",
+    linetype = "Model/Series"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+##### 3: Directional Accuracy
+Another interesting forecast accuracy measure is directional (or sign) accuracy. It measures the percentage of periods in which a model correctly predicts the direction of change in inflation relative to the previous period. We plot the directional accuracy of all models against a 50% random-guess benchmark:
+```r
+# Calculate directional accuracy for all models
+directional_accuracy_all <- pred_compiled %>%
+  pivot_longer(
+    cols = starts_with("pred_"),
+    names_to = "model",
+    names_prefix = "pred_",
+    values_to = ".pred"
+  ) %>%
+  group_by(model) %>%
+  mutate(
+    actual_dir = sign(actual - lag(actual, 1)),
+    pred_dir   = sign(.pred - lag(actual, 1))
+  ) %>%
+  drop_na() %>%
+  summarise(accuracy = mean(actual_dir == pred_dir) * 100)
+
+# Plot directional accuracy comparison
+ggplot(directional_accuracy_all, aes(x = reorder(model, accuracy), y = accuracy, fill = model)) +
+  geom_col(show.legend = FALSE, alpha = 0.8) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", linewidth = 0.8) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  theme_minimal() +
+  labs(
+    title = "Directional Accuracy Comparison",
+    subtitle = "Percentage of correct direction-of-change forecasts (Red line = 50% baseline)",
+    x = "Model",
+    y = "Accuracy Rate (%)"
+  ) +
+  coord_flip()
+```
+
+##### 4: Cumulative Forecast Errors
+A cumulative forecast error plot shows the dynamic trajectory of forecast errors over time. By plotting the cumulative sum of squared errors (SSE), we can observe whether a model's superior performance is consistent throughout the holdout sample or driven by specific periods:
+```r
+# Compute cumulative sum of squared forecast errors
+cum_errors <- pred_compiled %>%
+  pivot_longer(
+    cols = starts_with("pred_"),
+    names_to = "model",
+    names_prefix = "pred_",
+    values_to = ".pred"
+  ) %>%
+  mutate(sq_error = (actual - .pred)^2) %>%
+  group_by(model) %>%
+  arrange(date) %>%
+  mutate(cum_sse = cumsum(sq_error)) %>%
+  ungroup()
+
+# Plot cumulative errors over the holdout test period
+ggplot(cum_errors, aes(x = date, y = cum_sse, color = model)) +
+  geom_line(linewidth = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Cumulative Sum of Squared Forecast Errors (SSE)",
+    subtitle = "Lower curves indicate better out-of-sample performance over time",
+    x = "Date",
+    y = "Cumulative SSE",
+    color = "Model"
+  )
+```
+:::
+
+## Concluding Remarks on `{tidymodels}`
+
+Over this lecture series, we have leveraged the `{tidymodels}` ecosystem to construct a complete, reproducible, and robust machine learning workflow for time series forecasting:
+
+* **Pipeline Engineering (`{recipes}`, `{workflows}` & `{parsnip}`)**: Standardized feature preparation and model specifications.
+* **Resampling, Tuning (`{rsample}`, `{tune}` & `{dials}`)**: Set up time series rolling validation splits, explored multiple tuning strategies, and finalized our workflows with the best parameters on the validation set.
+* **Post-Processing, Model Comparison & Analysis (`{yardstick}`, `{ggplot2}` & `{broom}`)**: Evaluated out-of-sample performance, formatted outputs, and visualized forecasts, and metrics.
+
+Along the way, we integrated specialized, task-specific libraries to address requirements outside the core `{tidymodels}` framework, which included utilizing `{forecast}` and `{vip}`. We also discussed advanced modeling options, such as using the `{kerasnip}` package.
+
+### Going Further
+
+* **Tidymodels Homepage**: Visit the official [tidymodels website](https://www.tidymodels.org/) to access getting started guides, tutorials, and structured documentation for the entire ecosystem.
+* **Models Available**: Use the official [model finder](https://www.tidymodels.org/find/parsnip/) to search for supported model specifications, engines, and parameters. While the registry lists core packages, searching online can reveal community-contributed models (such as `{kerasnip}`). You can also build and integrate your own custom models into the ecosystem by following the official [guide to developing new models](https://www.tidymodels.org/learn/develop/models/).
+* **Advanced Tuning (`{tune}` & `{finetune}`)**: Beyond basic grids, we can use `{tune}` to execute Bayesian optimization or `{finetune}` to apply racing and simulated annealing to speed up parameter search.
+* **Tidy Modeling with R**: For a comprehensive, hands-on guide to modern modeling principles, consult the textbook [Tidy Modeling with R](https://www.tmwr.org/) written by Max Kuhn and Julia Silge - two of the primary developers of the packages.
+* **Model Interpretability (`{vip}` & `{pdp}`)**: Extract variable importance metrics, SHAP values, or partial dependence plots to explain predictions. For a more in-depth discussion, see the [Interpretable Machine Learning](https://christophm.github.io/interpretable-ml-book/) textbook by Christoph Molnar.
+
+

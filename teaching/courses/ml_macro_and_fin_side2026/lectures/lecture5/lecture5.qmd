@@ -1,0 +1,131 @@
+---
+title: "Lecture 5: Open Conversation on AI Agents in Research"
+subtitle: "Machine Learning for Macro Forecasting and Financial Econometrics (SIdE 2026)"
+author: "Rodrigo Sarlo"
+format:
+  html:
+    toc: true
+    toc-float: true
+    code-fold: true
+    code-summary: "Show the Code"
+    code-tools: true
+---
+
+## Overview
+In this final lecture, we step away from code tutorials to have an open conversation about using AI and LLM agents in academic research, coding, and econometrics. We reflect on the practical experiences of integrating agentic workflows in real-world projects and look ahead to more advanced automation tools (like custom Skills, MCP, Actions and Rules).
+
+---
+
+## Session 1: My Experience So Far (AI in Academic Research)
+
+Integrating AI agents into a research pipeline alters traditional empirical research. We examine how agent-augmented workflows changed my routine across various tasks, from complex mathematical implementation to daily administrative responsibilities.
+
+::: {.panel-tabset}
+
+### My Background
+How my programming journey shapes how I work with AI agents today. Below is a brief summary of my relevant experience, which shapes my current research workflows:
+
+- **First steps (around 2016)**: I began learning R as an undergraduate economics student. It remains, by far, my primary programming language for both research and teaching.
+- **Coding before AI**: Learning R and expanding my toolkit to other languages followed a self-directed, manual path: reading textbooks, taking online courses, watching tutorials, and searching Stack Overflow to debug errors*.
+- **Pre-AI Technical Foundations**:
+  - *Lab & Industry*: Coded daily in a university data science lab, worked on SQL/Python data pipelines in industry, and used Git for version control and collaboration.
+  - *Optimization and Profiling*: Built modeling pipelines from scratch and integrated C++ via `Rcpp` for my Master's thesis.
+  - *Adaptability*: Pivoted between C, Julia, and Python for graduate coursework.
+  - *Academic Writing*: Mastering the rigid structure of academic papers is challenging in itself, and even more so when writing in a foreign language.
+
+<small>\* *Note: I often joke with students that my programming expertise is mostly just a database of past bugs I've learned how to avoid, rather than formal software development skills.*</small>
+
+### Core Research Workflows
+My research focuses on the development of new econometric methods and applications. The use of AI agents is highly dependent on the specific task at hand. Below, I summarize the ongoing research projects and how AI assists in addressing the types of challenges I face.
+
+- **Current Projects**:
+  - A variant of Generalized Autoregressive Score (GAS) models using Gradient Boosting.
+  - Conformal prediction with input-dependent scaling.
+  - State-space models and filtering recursions for matrix-valued time series.
+- **AI-Assisted Research Workflows**:
+  - *Conceptual Brainstorming*: Discussing new research directions, mapping out future projects, and exploring how to position or frame research questions within the broader literature.
+  - *Methodological Brainstorming*: Evaluating modeling and algorithm design choices at a conceptual level.
+  - *Math & Formatting*: Assisting in mathematical derivations and typesetting clean LaTeX equations for papers.
+  - *Math-to-Code Translation*: Translating dense matrix algebra, multiple model equations, and pseudocode into optimized code.
+  - *Profiling & Debugging*: Identifying performance bottlenecks, profiling execution times, and debugging code. This is especially valuable when working with compiled code and performance frameworks like `Rcpp`.
+  - *Simulation & Parallelization*: Writing boilerplate for large-scale Monte Carlo simulation loops, and setting up parallelized execution to run simulations efficiently.
+  - *Academic Writing*: Polishing research drafts, improving sentence structure, and refining academic tone.
+
+### Auxiliary Academic Workflows
+- **Personal Websites**: Designing, troubleshooting, and customizing static sites (Hugo/Quarto). This task relies heavily on web design conventions and aesthetics (what "feels right or wrong") rather than relying on domain-specific knowledge, which makes AI-driven iteration highly effective.
+- **CV & LaTeX Workflows**: Keeping CVs, publications, and LaTeX formatting aligned, compiled, and updated.
+- **Class & Lab Preparation**: Translating syllabus goals into polished slides and self-contained scripts. This includes brainstorming pedagogical structures (like collaborating with an agent to design this very SIdE course).
+- **Repetitive Task Automation**: Streamlining routine, non-research scripting activities.
+
+### Reflections
+My experience is that my work is transitioning from *writing* to *orchestrating*, both in coding and across the broader research process:
+
+- **Orchestration**: Less time writing syntax and more time designing workflows, defining structures, and framing instructions.
+- **Syntactic vs. Conceptual Focus**: Writing syntax is easy for AI to generate and relatively straightforward to check. This has allowed me to shift focus from the details of the code toward the higher-level "architectural" and conceptual details of my research.
+- **Studying & Drafting Ideas**: AI excels as a conversational partner for drafting research outlines, clarifying unfamiliar methodologies, and brainstorming model structures before coding begins.
+- **Research Verification vs. Software Engineering**: Unlike commercial software development, empirical research rarely has a unique solution or a pre-defined optimal path - meaning we cannot know the final form of the paper or empirical model beforehand. Because we cannot easily write automated unit tests for AI-generated code, thorough validation remains indispensable.
+- **Deterministic over Stochastic**: Avoid delegating tasks to a stochastic LLM if they can be solved deterministically. If a rule-based script, exact formula, or database query can do the job, I prefer avoiding AI intervention.
+:::
+
+---
+
+## Session 2: Planned Next Steps (Advanced Agentic Workflows)
+
+We now discuss a few agentic concepts that I plan to explore and test for integration into my empirical workflows. These represent some of the ideas discussed in the AI research community, but they are far from a comprehensive list.
+
+::: {.panel-tabset}
+
+### Skills
+*Skills* are an open standard for extending agent capabilities. They are reusable, encapsulated directories containing a `SKILL.md` file with instructions written in plain-English and specific conventions to follow, along with optional helper scripts, examples, and references. (See [Antigravity's Documentation - Skills](https://antigravity.google/docs/skills)).
+
+* **Why use Skills?**:
+  - *Heuristics over Hard-Coding*: Best for tasks that require qualitative judgment rather than rigid `if/else` code.
+  - *Contextual & Dynamic*: The agent evaluates the workspace state and history to apply instructions flexibly.
+  - *Semantic Discovery*: Automatically discovered and loaded by the agent based on task descriptions, avoiding hard-coded imports.
+
+Below is a skill template from Antigravity's documentation:
+
+````markdown
+---
+name: my-skill
+description: Helps with a specific task. Use when you need to do X or Y.
+---
+
+# My Skill
+
+Detailed instructions for the agent go here.
+
+## When to use this skill
+
+- Use this when...
+- This is helpful for...
+
+## How to use it
+
+Step-by-step guidance, conventions, and patterns the agent should follow.
+````
+
+A *Plugin* bundles multiple related skills into a single directory so they can be loaded together. For instance, the global `science` plugin equips the agent with domain-specific skills such as `literature-search-arxiv` (for literature retrieval) and `workflow-skill-creator` (for automating custom multi-step routines).
+
+*Discussion Point*: How might we encapsulate tasks like literature reviews, formatting, or model diagnostics into reusable agent instructions rather than hard-coded functions?
+
+
+### Model Context Protocol (MCP)
+*Model Context Protocol (MCP)* is an open standard that enables developers to build secure, two-way connections between AI models and their data sources, tools, and environments. Instead of writing custom integrations for every platform, MCP provides a unified API for clients (like Antigravity) to communicate with external servers. (See [Antigravity's Documentation - MCP](https://antigravity.google/docs/mcp)).
+
+*Key Concept*: MCP decouples the AI model from tools and data sources, allowing the agent to securely query external databases (e.g., FRED or local SQL databases) or connect to remote computation environments.
+
+### Actions, Rules & Autonomous Tools
+*Actions* grant AI agents execution and write permissions - allowing them to run terminal commands, compile files, execute test suites, and edit code directly on the local filesystem. The `/goal` action, for instance, tells an AI agent to try to achieve a specific goal by executing commands and editing files autonomously.
+
+*Rules* define persistent behavioral constraints and style guidelines that shape how the agent solves tasks and ensure it operates safely within project boundaries. (See [Antigravity's Documentation - Rules](https://antigravity.google/docs/rules-workflows)).
+
+*Key Integration*: Using autonomous goal loops (like `/goal`) to compile code (e.g., C++ via `Rcpp`) and debug errors recursively, while setting rules in `AGENTS.md` to enforce styling (like using `=` for R assignment) and code safety.
+:::
+
+---
+
+## Discussion
+
+- **AI Adoption**: How has your daily programming routine changed since the rise of LLMs and AI Agents? What are the biggest friction points or trust issues you face?
+- **Tools**: Which of the agentic tools discussed today (reusable Skills, database MCP servers, or autonomous debugging loops) do you think would be most useful to integrate into your workflow? Which do you already use, and how do you use them?

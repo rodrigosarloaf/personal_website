@@ -1,0 +1,27 @@
+<div class="list quarto-listing-default">
+<% for (const item of items) { %>
+<div class="quarto-post image-right" <%= metadataAttrs(item) %> style="border-bottom: 1px solid #30363d; padding-bottom: 1.5rem; margin-bottom: 1.5rem;">
+<div class="body">
+<h3 class="no-anchor listing-title" style="margin-bottom: 0.5rem; font-size: 1.5rem;">
+<a href="<%- item.path %>" style="color: #58a6ff; text-decoration: underline;"><%= item.title %></a>
+</h3>
+<% if (item.subtitle) { %>
+<div class="listing-subtitle" style="font-size: 1.1rem; color: #8b949e; margin-bottom: 0.5rem;">
+<%= item.subtitle %>
+</div>
+<% } %>
+<% if (item.description) { %>
+<div class="listing-description" style="color: #c9d1d9; margin-bottom: 0.5rem;">
+<%= item.description %>
+</div>
+<% } %>
+</div>
+<div class="metadata" style="font-size: 0.9rem; color: #8b949e;">
+<span class="listing-author"><%= item.author %></span>
+<% if (item.date) { %>
+• <span class="listing-date"><%= item.date %></span>
+<% } %>
+</div>
+</div>
+<% } %>
+</div>
